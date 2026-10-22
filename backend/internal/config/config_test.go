@@ -10,6 +10,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("APP_ENV", "")
 	t.Setenv("HTTP_ADDR", "")
 	t.Setenv("SHUTDOWN_TIMEOUT", "")
+	t.Setenv("DATABASE_URL", "postgres://test")
 
 	cfg, err := Load()
 	if err != nil {
@@ -27,13 +28,14 @@ func TestLoadShutdownTimeout(t *testing.T) {
 		wantErr bool
 	}{
 		{in: "15s", want: 15 * time.Second},
-		{in: "20", wantErr: true}, // без единиц измерения — ошибка
+		{in: "20", wantErr: true},
 		{in: "1m", want: time.Minute},
 		{in: "абв", wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
 			t.Setenv("APP_ENV", "local")
+			t.Setenv("DATABASE_URL", "postgres://test")
 			t.Setenv("SHUTDOWN_TIMEOUT", tc.in)
 
 			cfg, err := Load()
@@ -55,7 +57,16 @@ func TestLoadShutdownTimeout(t *testing.T) {
 
 func TestLoadRejectsUnknownEnv(t *testing.T) {
 	t.Setenv("APP_ENV", "prod") // опечатка: правильно "production"
+	t.Setenv("DATABASE_URL", "postgres://test")
 	if _, err := Load(); err == nil {
 		t.Fatal("ожидали ошибку на неизвестное окружение")
+	}
+}
+
+func TestLoadRequiresDatabaseURL(t *testing.T) {
+	t.Setenv("APP_ENV", "local")
+	t.Setenv("DATABASE_URL", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("ожидали ошибку: DATABASE_URL обязателен")
 	}
 }

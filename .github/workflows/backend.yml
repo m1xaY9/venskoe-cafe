@@ -10,6 +10,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: venskoe
+          POSTGRES_PASSWORD: venskoe
+          POSTGRES_DB: venskoe
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U venskoe"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://venskoe:venskoe@localhost:5432/venskoe?sslmode=disable
     defaults:
       run:
         working-directory: backend

@@ -13,6 +13,8 @@ type Config struct {
 	HTTPAddr string `env:"HTTP_ADDR" envDefault:":8080"`
 
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
+
+	DatabaseURL string `env:"DATABASE_URL,required,notEmpty"`
 }
 
 func Load() (Config, error) {

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -8,11 +9,26 @@ import (
 	"time"
 )
 
-func NewHandler(log *slog.Logger, version string) http.Handler {
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
+func NewHandler(log *slog.Logger, version string, db Pinger) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": version})
+	})
+
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
+			log.Error("readyz: база недоступна", "err", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "db unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
 	return recoverPanic(log, logRequests(log, mux))

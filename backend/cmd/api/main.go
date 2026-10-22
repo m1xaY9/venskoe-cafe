@@ -9,8 +9,11 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
 	"venskoe/backend/internal/config"
+	"venskoe/backend/internal/db"
 	"venskoe/backend/internal/httpapi"
+	"venskoe/backend/migrations"
 )
 
 var version = "dev"
@@ -35,17 +38,28 @@ func run() error {
 		log = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if err := db.Migrate(ctx, pool, migrations.FS); err != nil {
+		return err
+	}
+	log.Info("база готова, миграции применены")
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewHandler(log, version),
+		Handler:           httpapi.NewHandler(log, version, pool),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {
