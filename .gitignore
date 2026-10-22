@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+backend/bin/
+*.test
+*.out
+coverage.*
+
+node_modules/
+.next/
+out/
+
+.idea/
+.vscode/
+.DS_Store
