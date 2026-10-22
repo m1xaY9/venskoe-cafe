@@ -53,8 +53,8 @@ func run() error {
 	log.Info("база готова, миграции применены")
 
 	srv := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: httpapi.NewHandler(log, version, pool),
+		Addr:              cfg.HTTPAddr,
+		Handler:           httpapi.NewHandler(log, version, pool),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

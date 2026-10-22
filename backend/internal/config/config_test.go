@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	
+
 	t.Setenv("APP_ENV", "")
 	t.Setenv("HTTP_ADDR", "")
 	t.Setenv("SHUTDOWN_TIMEOUT", "")
