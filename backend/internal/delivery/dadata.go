@@ -11,10 +11,13 @@ import (
 )
 
 // Suggestion — одна подсказка адреса: что показать и координаты для карты/зоны.
+// Lat/Lon — указатели: если у адреса нет координат, отдаём null, а не 0 (иначе точка
+// уехала бы в Гвинейский залив). Precise — координаты до дома (можно сразу считать зону).
 type Suggestion struct {
-	Value string  `json:"value"`
-	Lat   float64 `json:"lat"`
-	Lon   float64 `json:"lon"`
+	Value   string   `json:"value"`
+	Lat     *float64 `json:"lat"`
+	Lon     *float64 `json:"lon"`
+	Precise bool     `json:"precise"`
 }
 
 // ErrNoAPIKey — ключ DaData не задан. Обработчик превратит это в понятный 503,
@@ -83,6 +86,8 @@ func (d *DaData) Suggest(ctx context.Context, query string) ([]Suggestion, error
 			Data  struct {
 				GeoLat string `json:"geo_lat"`
 				GeoLon string `json:"geo_lon"`
+				// qc_geo: "0" — координаты до дома, остальное — грубее или их нет.
+				QCGeo string `json:"qc_geo"`
 			} `json:"data"`
 		} `json:"suggestions"`
 	}
@@ -92,10 +97,19 @@ func (d *DaData) Suggest(ctx context.Context, query string) ([]Suggestion, error
 
 	res := make([]Suggestion, 0, len(out.Suggestions))
 	for _, s := range out.Suggestions {
-		// DaData отдаёт координаты строками; пустые превратятся в 0.
-		lat, _ := strconv.ParseFloat(s.Data.GeoLat, 64)
-		lon, _ := strconv.ParseFloat(s.Data.GeoLon, 64)
-		res = append(res, Suggestion{Value: s.Value, Lat: lat, Lon: lon})
+		sg := Suggestion{Value: s.Value}
+		// DaData отдаёт координаты строками. Если их нет — оставляем Lat/Lon нулевыми
+		// указателями (null), чтобы не выдать фальшивые нулевые координаты.
+		if s.Data.GeoLat != "" && s.Data.GeoLon != "" {
+			lat, errLat := strconv.ParseFloat(s.Data.GeoLat, 64)
+			lon, errLon := strconv.ParseFloat(s.Data.GeoLon, 64)
+			if errLat == nil && errLon == nil {
+				sg.Lat = &lat
+				sg.Lon = &lon
+				sg.Precise = s.Data.QCGeo == "0"
+			}
+		}
+		res = append(res, sg)
 		if len(res) >= maxSuggestions {
 			break
 		}

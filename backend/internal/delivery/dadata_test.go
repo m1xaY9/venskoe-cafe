@@ -10,9 +10,10 @@ import (
 )
 
 func TestDaDataSuggest(t *testing.T) {
+	// Первая подсказка — с координатами до дома (qc_geo "0"), вторая — улица без координат.
 	const response = `{"suggestions":[
-		{"value":"г Чита, ул Ленина, д 1","data":{"geo_lat":"52.033","geo_lon":"113.501"}},
-		{"value":"г Чита, ул Ленина, д 2","data":{"geo_lat":"52.034","geo_lon":"113.502"}}
+		{"value":"г Чита, ул Ленина, д 1","data":{"geo_lat":"52.033","geo_lon":"113.501","qc_geo":"0"}},
+		{"value":"г Чита, ул Ленина","data":{"geo_lat":"","geo_lon":"","qc_geo":"5"}}
 	]}`
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -32,8 +33,20 @@ func TestDaDataSuggest(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("подсказок %d, ждали 2", len(got))
 	}
-	if got[0].Value != "г Чита, ул Ленина, д 1" || got[0].Lat != 52.033 || got[0].Lon != 113.501 {
-		t.Errorf("первая подсказка разобрана неверно: %+v", got[0])
+
+	// Дом: координаты есть, precise=true.
+	first := got[0]
+	if first.Value != "г Чита, ул Ленина, д 1" || first.Lat == nil || first.Lon == nil {
+		t.Fatalf("первая подсказка разобрана неверно: %+v", first)
+	}
+	if *first.Lat != 52.033 || *first.Lon != 113.501 || !first.Precise {
+		t.Errorf("координаты/precise первой подсказки неверны: lat=%v lon=%v precise=%v", *first.Lat, *first.Lon, first.Precise)
+	}
+
+	// Улица без координат: Lat/Lon = nil, precise=false.
+	second := got[1]
+	if second.Lat != nil || second.Lon != nil || second.Precise {
+		t.Errorf("подсказка без координат: ждали lat/lon=null и precise=false, получили %+v", second)
 	}
 }
 
