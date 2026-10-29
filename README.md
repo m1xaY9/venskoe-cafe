@@ -44,7 +44,7 @@ make lint              # проверки, которые запускает CI
 | `GET /readyz` | доступна ли база |
 | `GET /api/menu` | меню для гостя: `{"categories": [...]}` с блюдами по категориям; блюда из стоп-листа отдаются с `available: false` |
 | `GET /api/delivery/info` | часы работы, открыто ли сейчас, адрес самовывоза и список зон доставки — для страницы «Доставка» |
-| `POST /api/delivery/quote` | по `{lat, lon, subtotal_kop}` отвечает: зона, цена доставки, минимум, можно ли заказать и почему нет (`outside_zone` / `closed` / `below_minimum`) |
+| `POST /api/delivery/quote` | по `{lat, lon, subtotal_kop}` отвечает: зона, цена доставки, минимум, можно ли заказать и почему нет (`delivery_disabled` / `outside_zone` / `closed` / `below_minimum`). `lat`/`lon` обязательны и в допустимых пределах, иначе `422 invalid_coordinates` |
 | `GET /api/address/suggest?q=...` | подсказки адреса через DaData (прокси, чтобы токен не попал в браузер); от 3 символов, до 10 подсказок |
 
 Примеры:
