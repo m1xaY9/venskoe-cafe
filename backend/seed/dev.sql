@@ -31,4 +31,33 @@ INSERT INTO dishes (category_id, title, description, portion, price_kop, sort) V
 
 UPDATE dishes SET is_available = false WHERE title = 'Гуляш по-венски';
 
+-- Доставка: строки cafe_settings и work_hours создаёт миграция 00003, здесь только
+-- задаём им значения для локальной разработки (UPDATE, не TRUNCATE). Зоны — чисто
+-- тестовые данные, их наполняем сами. Все значения ниже — ЗАГЛУШКИ, реальные нужно
+-- взять у владельца (см. раздел «Нужно от владельца» в PR).
+UPDATE cafe_settings SET
+    delivery_enabled = true,
+    pickup_enabled = true,
+    pickup_address = 'Чита, ул. Ленина, 1 (ЗАГЛУШКА)',
+    pickup_min_order_kop = 50000,
+    last_order_before_close_min = 30
+WHERE id = 1;
+
+-- weekday как в Go time.Weekday: 0 — воскресенье, 1 — понедельник ... 6 — суббота.
+UPDATE work_hours SET is_open = true, open_at = '10:00', close_at = '22:00' WHERE weekday BETWEEN 1 AND 4;
+UPDATE work_hours SET is_open = true, open_at = '10:00', close_at = '23:00' WHERE weekday = 5;
+UPDATE work_hours SET is_open = true, open_at = '11:00', close_at = '23:00' WHERE weekday = 6;
+UPDATE work_hours SET is_open = true, open_at = '11:00', close_at = '22:00' WHERE weekday = 0;
+
+-- Две зоны-заглушки вокруг центра Читы (примерно 52.034, 113.499). Координаты [lon, lat].
+-- «Центр» (sort 10) лежит внутри «Город» (sort 20) — на пересечении берётся зона с меньшим sort.
+TRUNCATE delivery_zones RESTART IDENTITY;
+INSERT INTO delivery_zones (name, polygon, delivery_price_kop, min_order_kop, free_from_kop, sort) VALUES
+    ('Центр',
+     '{"type":"Polygon","coordinates":[[[113.479,52.014],[113.519,52.014],[113.519,52.054],[113.479,52.054],[113.479,52.014]]]}',
+     20000, 80000, 150000, 10),
+    ('Город',
+     '{"type":"Polygon","coordinates":[[[113.449,51.984],[113.549,51.984],[113.549,52.084],[113.449,52.084],[113.449,51.984]]]}',
+     35000, 100000, NULL, 20);
+
 COMMIT;

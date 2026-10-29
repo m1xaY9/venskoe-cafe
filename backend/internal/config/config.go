@@ -15,6 +15,10 @@ type Config struct {
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"10s"`
 
 	DatabaseURL string `env:"DATABASE_URL,required,notEmpty"`
+
+	// Токен DaData для подсказок адреса. Необязателен: без него подсказки просто
+	// не работают (обработчик вернёт 503), остальной сайт живёт.
+	DaDataAPIKey string `env:"DADATA_API_KEY"`
 }
 
 func Load() (Config, error) {

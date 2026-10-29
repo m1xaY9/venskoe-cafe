@@ -43,5 +43,16 @@ make lint              # проверки, которые запускает CI
 | `GET /healthz` | жив ли сервис |
 | `GET /readyz` | доступна ли база |
 | `GET /api/menu` | меню для гостя: `{"categories": [...]}` с блюдами по категориям; блюда из стоп-листа отдаются с `available: false` |
+| `GET /api/delivery/info` | часы работы, открыто ли сейчас, адрес самовывоза и список зон доставки — для страницы «Доставка» |
+| `POST /api/delivery/quote` | по `{lat, lon, subtotal_kop}` отвечает: зона, цена доставки, минимум, можно ли заказать и почему нет (`delivery_disabled` / `outside_zone` / `closed` / `below_minimum`). `lat`/`lon` обязательны и в допустимых пределах, иначе `422 invalid_coordinates` |
+| `GET /api/address/suggest?q=...` | подсказки адреса через DaData (прокси, чтобы токен не попал в браузер); от 3 символов, до 10 подсказок |
 
-Посмотреть меню: `curl http://localhost:8080/api/menu`
+Примеры:
+```bash
+curl http://localhost:8080/api/menu
+curl http://localhost:8080/api/delivery/info
+curl -X POST http://localhost:8080/api/delivery/quote -d '{"lat":52.034,"lon":113.499,"subtotal_kop":100000}'
+curl "http://localhost:8080/api/address/suggest?q=Чита+Ленина"   # нужен DADATA_API_KEY в .env
+```
+
+Подсказки адреса работают только если в `.env` задан `DADATA_API_KEY`; без него `GET /api/address/suggest` отвечает `503`, остальной сайт работает.

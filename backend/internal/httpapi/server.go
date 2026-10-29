@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"venskoe/backend/internal/delivery"
 	"venskoe/backend/internal/menu"
 )
 
@@ -20,13 +21,26 @@ type MenuProvider interface {
 	Menu(ctx context.Context) ([]menu.Category, error)
 }
 
+// DeliveryService — логика доставки. За ней скрыт delivery.Service, в тестах — заглушка.
+type DeliveryService interface {
+	Info(ctx context.Context, now time.Time) (delivery.Info, error)
+	Quote(ctx context.Context, now time.Time, in delivery.QuoteInput) (delivery.Quote, error)
+}
+
+// AddressSuggester отдаёт подсказки адреса. За ним скрыт delivery.DaData, в тестах — заглушка.
+type AddressSuggester interface {
+	Suggest(ctx context.Context, query string) ([]delivery.Suggestion, error)
+}
+
 // Deps — зависимости обработчиков. Передаём их одной структурой, чтобы в тестах
 // подставлять заглушки вместо настоящих базы и домена.
 type Deps struct {
-	Log     *slog.Logger
-	Version string
-	DB      Pinger
-	Menu    MenuProvider
+	Log      *slog.Logger
+	Version  string
+	DB       Pinger
+	Menu     MenuProvider
+	Delivery DeliveryService
+	Address  AddressSuggester
 }
 
 func NewHandler(d Deps) http.Handler {
@@ -58,6 +72,9 @@ func NewHandler(d Deps) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"categories": categories})
 	})
+
+	d.registerDelivery(mux)
+	d.registerAddress(mux)
 
 	return recoverPanic(d.Log, logRequests(d.Log, mux))
 }
