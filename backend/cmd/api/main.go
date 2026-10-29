@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,8 +11,13 @@ import (
 	"syscall"
 	"time"
 
+	// tzdata встраивает базу часовых поясов в бинарник: в distroless-образе её нет,
+	// а нам нужен Asia/Chita для расчёта часов работы.
+	_ "time/tzdata"
+
 	"venskoe/backend/internal/config"
 	"venskoe/backend/internal/db"
+	"venskoe/backend/internal/delivery"
 	"venskoe/backend/internal/httpapi"
 	"venskoe/backend/internal/menu"
 	"venskoe/backend/migrations"
@@ -30,6 +36,12 @@ func run() error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
+	}
+
+	// Часы работы, «сегодня» и сводки считаем в часовом поясе Читы.
+	chita, err := time.LoadLocation("Asia/Chita")
+	if err != nil {
+		return fmt.Errorf("не удалось загрузить часовой пояс Asia/Chita: %w", err)
 	}
 
 	var log *slog.Logger
@@ -56,10 +68,12 @@ func run() error {
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewHandler(httpapi.Deps{
-			Log:     log,
-			Version: version,
-			DB:      pool,
-			Menu:    menu.NewStore(pool),
+			Log:      log,
+			Version:  version,
+			DB:       pool,
+			Menu:     menu.NewStore(pool),
+			Delivery: delivery.NewService(delivery.NewStore(pool), chita),
+			Address:  delivery.NewDaData(cfg.DaDataAPIKey, "", nil),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
