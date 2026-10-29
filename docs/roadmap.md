@@ -11,12 +11,12 @@
 - В самом конце — Telegram Mini App с тем же меню и доставкой.
 
 ## Этап 0. Основа
-- [ ] `main`: README, правила работы, архитектура, roadmap
-- [ ] `feature/backend-skeleton`: Go API с /healthz, конфигом из env, логами, корректной остановкой, тестами и CI
+- [x] `main`: README, правила работы, архитектура, roadmap
+- [x] `feature/backend-skeleton`: Go API с /healthz, конфигом из env, логами, корректной остановкой, тестами и CI
 
 ## Этап 1. Меню
-- [ ] `feature/db`: PostgreSQL в Docker, миграции (goose), запросы через sqlc
-- [ ] `feature/menu-api`: категории, блюда, стоп-лист; `GET /api/menu`
+- [x] `feature/db`: PostgreSQL в Docker, миграции (goose), запросы руками через pgx
+- [x] `feature/menu-api`: категории, блюда, стоп-лист; `GET /api/menu`
 - [ ] `feature/frontend-skeleton`: Next.js + Tailwind, адаптивная вёрстка, страница меню с данными из API
 
 ## Этап 2. Корзина и оформление
