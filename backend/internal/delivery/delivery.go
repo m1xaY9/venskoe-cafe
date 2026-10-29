@@ -7,9 +7,10 @@ import (
 
 // Коды причин, почему заказать нельзя. Латиницей — для программы на фронте.
 const (
-	ReasonOutsideZone  = "outside_zone"  // адрес вне зон доставки
-	ReasonClosed       = "closed"        // кафе сейчас закрыто или приём заказов уже окончен
-	ReasonBelowMinimum = "below_minimum" // сумма меньше минимальной для зоны
+	ReasonDeliveryDisabled = "delivery_disabled" // доставка временно отключена в настройках
+	ReasonOutsideZone      = "outside_zone"      // адрес вне зон доставки
+	ReasonClosed           = "closed"            // кафе сейчас закрыто или приём заказов уже окончен
+	ReasonBelowMinimum     = "below_minimum"     // сумма меньше минимальной для зоны
 )
 
 // Settings — настройки кафе (одна строка в cafe_settings).
@@ -158,6 +159,11 @@ func (s *Service) Quote(ctx context.Context, now time.Time, in QuoteInput) (Quot
 	}
 
 	open := openNow(now.In(s.loc), hoursByWeekday(hours), settings.LastOrderBeforeCloseMin)
+
+	// Доставка может быть выключена целиком — тогда зона и сумма уже не важны.
+	if !settings.DeliveryEnabled {
+		return Quote{OpenNow: open, CanOrder: false, Reason: ReasonDeliveryDisabled}, nil
+	}
 
 	zone, ok := findZone(zones, Point{Lon: in.Lon, Lat: in.Lat})
 	if !ok {

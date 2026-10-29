@@ -202,6 +202,27 @@ func TestServiceQuote(t *testing.T) {
 	})
 }
 
+func TestServiceQuoteDeliveryDisabled(t *testing.T) {
+	loc := time.UTC
+	wd := time.Date(2026, 10, 26, 0, 0, 0, 0, loc).Weekday()
+	store := fakeStore{
+		settings: Settings{DeliveryEnabled: false, LastOrderBeforeCloseMin: 30},
+		hours:    []DayHours{{Weekday: int(wd), IsOpen: true, OpenAt: "10:00", CloseAt: "22:00"}},
+		zones:    testZones(),
+	}
+	svc := NewService(store, loc)
+
+	// Даже в зоне, открыто и выше минимума — заказать нельзя, если доставка выключена.
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, loc)
+	q, err := svc.Quote(context.Background(), now, QuoteInput{Lat: 52.034, Lon: 113.499, SubtotalKop: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.CanOrder || q.Reason != ReasonDeliveryDisabled {
+		t.Fatalf("ждали delivery_disabled: %+v", q)
+	}
+}
+
 // Проверяем, что часы считаются в Asia/Chita: 03:00 UTC = 12:00 в Чите → открыто.
 func TestServiceQuoteUsesChitaTimezone(t *testing.T) {
 	chita, err := time.LoadLocation("Asia/Chita")
