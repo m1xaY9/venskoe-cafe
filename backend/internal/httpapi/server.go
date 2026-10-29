@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"venskoe/backend/internal/delivery"
@@ -74,62 +73,8 @@ func NewHandler(d Deps) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"categories": categories})
 	})
 
-	mux.HandleFunc("GET /api/delivery/info", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-		info, err := d.Delivery.Info(ctx, time.Now())
-		if err != nil {
-			d.Log.Error("api/delivery/info: не смогли собрать данные", "err", err)
-			writeError(w, http.StatusInternalServerError, "internal", "Не удалось загрузить информацию о доставке")
-			return
-		}
-		writeJSON(w, http.StatusOK, info)
-	})
-
-	mux.HandleFunc("POST /api/delivery/quote", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-		var body struct {
-			Lat         float64 `json:"lat"`
-			Lon         float64 `json:"lon"`
-			SubtotalKop int64   `json:"subtotal_kop"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Неверное тело запроса")
-			return
-		}
-		if body.SubtotalKop < 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "Сумма заказа не может быть отрицательной")
-			return
-		}
-		quote, err := d.Delivery.Quote(ctx, time.Now(), delivery.QuoteInput{
-			Lat: body.Lat, Lon: body.Lon, SubtotalKop: body.SubtotalKop,
-		})
-		if err != nil {
-			d.Log.Error("api/delivery/quote: не смогли рассчитать", "err", err)
-			writeError(w, http.StatusInternalServerError, "internal", "Не удалось рассчитать доставку")
-			return
-		}
-		writeJSON(w, http.StatusOK, quote)
-	})
-
-	mux.HandleFunc("GET /api/address/suggest", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-		q := strings.TrimSpace(r.URL.Query().Get("q"))
-		// Меньше 3 символов не ищем — это ещё не адрес, просто отдаём пустой список.
-		if len([]rune(q)) < 3 {
-			writeJSON(w, http.StatusOK, map[string]any{"suggestions": []delivery.Suggestion{}})
-			return
-		}
-		suggestions, err := d.Address.Suggest(ctx, q)
-		if err != nil {
-			d.Log.Error("api/address/suggest: подсказки недоступны", "err", err)
-			writeError(w, http.StatusServiceUnavailable, "address_unavailable", "Подсказки адреса временно недоступны")
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"suggestions": suggestions})
-	})
+	d.registerDelivery(mux)
+	d.registerAddress(mux)
 
 	return recoverPanic(d.Log, logRequests(d.Log, mux))
 }

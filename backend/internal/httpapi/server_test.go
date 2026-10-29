@@ -244,8 +244,44 @@ func TestDeliveryQuoteBadBody(t *testing.T) {
 	}
 }
 
+func TestDeliveryQuoteInvalidCoordinates(t *testing.T) {
+	h := NewHandler(testDeps(fakeDB{}, fakeMenu{}, fakeDelivery{}, fakeAddress{}))
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"координат нет", `{"subtotal_kop":100000}`},
+		{"нет широты", `{"lon":113.5,"subtotal_kop":100000}`},
+		{"широта за пределами", `{"lat":100,"lon":113.5,"subtotal_kop":100000}`},
+		{"долгота за пределами", `{"lat":52,"lon":200,"subtotal_kop":100000}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/delivery/quote", strings.NewReader(tc.body)))
+
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("код ответа %d, ждали 422", rec.Code)
+			}
+			var body struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+				t.Fatalf("ответ не JSON: %v", err)
+			}
+			if body.Error.Code != "invalid_coordinates" {
+				t.Errorf("код ошибки %q, ждали invalid_coordinates", body.Error.Code)
+			}
+		})
+	}
+}
+
 func TestAddressSuggest(t *testing.T) {
-	stub := fakeAddress{suggestions: []delivery.Suggestion{{Value: "г Чита, ул Ленина, д 1", Lat: 52.03, Lon: 113.5}}}
+	lat, lon := 52.03, 113.5
+	stub := fakeAddress{suggestions: []delivery.Suggestion{{Value: "г Чита, ул Ленина, д 1", Lat: &lat, Lon: &lon, Precise: true}}}
 	h := NewHandler(testDeps(fakeDB{}, fakeMenu{}, fakeDelivery{}, stub))
 
 	rec := httptest.NewRecorder()
