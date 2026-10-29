@@ -31,4 +31,35 @@ INSERT INTO dishes (category_id, title, description, portion, price_kop, sort) V
 
 UPDATE dishes SET is_available = false WHERE title = 'Гуляш по-венски';
 
+-- Доставка: настройки кафе, часы работы и зоны. Всё ниже — ЗАГЛУШКИ для разработки,
+-- реальные значения нужно взять у владельца (см. раздел «Нужно от владельца» в PR).
+TRUNCATE delivery_zones RESTART IDENTITY;
+TRUNCATE work_hours;
+TRUNCATE cafe_settings;
+
+INSERT INTO cafe_settings
+    (id, delivery_enabled, pickup_enabled, pickup_address, pickup_min_order_kop, last_order_before_close_min)
+VALUES
+    (1, true, true, 'Чита, ул. Ленина, 1 (ЗАГЛУШКА)', 50000, 30);
+
+-- weekday как в Go time.Weekday: 0 — воскресенье, 1 — понедельник ... 6 — суббота.
+INSERT INTO work_hours (weekday, is_open, open_at, close_at) VALUES
+    (1, true, '10:00', '22:00'),
+    (2, true, '10:00', '22:00'),
+    (3, true, '10:00', '22:00'),
+    (4, true, '10:00', '22:00'),
+    (5, true, '10:00', '23:00'),
+    (6, true, '11:00', '23:00'),
+    (0, true, '11:00', '22:00');
+
+-- Две зоны-заглушки вокруг центра Читы (примерно 52.034, 113.499). Координаты [lon, lat].
+-- «Центр» (sort 10) лежит внутри «Город» (sort 20) — на пересечении берётся зона с меньшим sort.
+INSERT INTO delivery_zones (name, polygon, delivery_price_kop, min_order_kop, free_from_kop, sort) VALUES
+    ('Центр',
+     '{"type":"Polygon","coordinates":[[[113.479,52.014],[113.519,52.014],[113.519,52.054],[113.479,52.054],[113.479,52.014]]]}',
+     20000, 80000, 150000, 10),
+    ('Город',
+     '{"type":"Polygon","coordinates":[[[113.449,51.984],[113.549,51.984],[113.549,52.084],[113.449,52.084],[113.449,51.984]]]}',
+     35000, 100000, NULL, 20);
+
 COMMIT;
