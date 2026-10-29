@@ -13,6 +13,7 @@ import (
 	"venskoe/backend/internal/config"
 	"venskoe/backend/internal/db"
 	"venskoe/backend/internal/httpapi"
+	"venskoe/backend/internal/menu"
 	"venskoe/backend/migrations"
 )
 
@@ -53,8 +54,13 @@ func run() error {
 	log.Info("база готова, миграции применены")
 
 	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewHandler(log, version, pool),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.NewHandler(httpapi.Deps{
+			Log:     log,
+			Version: version,
+			DB:      pool,
+			Menu:    menu.NewStore(pool),
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
