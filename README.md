@@ -46,6 +46,8 @@ make lint              # проверки, которые запускает CI
 | `GET /api/delivery/info` | часы работы, открыто ли сейчас, адрес самовывоза и список зон доставки — для страницы «Доставка» |
 | `POST /api/delivery/quote` | по `{lat, lon, subtotal_kop}` отвечает: зона, цена доставки, минимум, можно ли заказать и почему нет (`delivery_disabled` / `outside_zone` / `closed` / `below_minimum`). `lat`/`lon` обязательны и в допустимых пределах, иначе `422 invalid_coordinates` |
 | `GET /api/address/suggest?q=...` | подсказки адреса через DaData (прокси, чтобы токен не попал в браузер); от 3 символов, до 10 подсказок |
+| `POST /api/orders` | оформить заказ. Сумму считает сервер по ценам из базы. Нужен заголовок `Idempotency-Key` (UUID): повтор с тем же ключом вернёт тот же заказ. Ошибки валидации — `422` с кодом по каждому полю (`dish_unavailable`, `below_minimum`, `outside_zone`, `closed`, `invalid_phone`, ...). Больше `N` заказов в минуту с одного IP — `429` |
+| `GET /api/orders/{token}` | заказ для гостя по публичному токену: состав, суммы, статус и история этапов. `404`, если токена нет |
 
 Примеры:
 ```bash
@@ -53,6 +55,14 @@ curl http://localhost:8080/api/menu
 curl http://localhost:8080/api/delivery/info
 curl -X POST http://localhost:8080/api/delivery/quote -d '{"lat":52.034,"lon":113.499,"subtotal_kop":100000}'
 curl "http://localhost:8080/api/address/suggest?q=Чита+Ленина"   # нужен DADATA_API_KEY в .env
+
+# Создать заказ (самовывоз, оплата при получении). dish_id берутся из /api/menu.
+curl -X POST http://localhost:8080/api/orders \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"fulfillment":"pickup","payment_method":"on_delivery","name":"Иван","phone":"8 999 123-45-67","items":[{"dish_id":1,"qty":2}]}'
+
+# Открыть заказ по токену из ответа:
+curl http://localhost:8080/api/orders/<token>
 ```
 
 Подсказки адреса работают только если в `.env` задан `DADATA_API_KEY`; без него `GET /api/address/suggest` отвечает `503`, остальной сайт работает.
