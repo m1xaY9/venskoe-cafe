@@ -48,6 +48,30 @@ make lint              # проверки, которые запускает CI
 | `GET /api/address/suggest?q=...` | подсказки адреса через DaData (прокси, чтобы токен не попал в браузер); от 3 символов, до 10 подсказок |
 | `POST /api/orders` | оформить заказ. Сумму считает сервер по ценам из базы. Нужен заголовок `Idempotency-Key` (UUID, иначе `400`): повтор с тем же ключом вернёт тот же заказ. Ошибки валидации — `422` с кодом по каждому полю (`dish_unavailable`, `below_minimum`, `outside_zone`, `closed`, `invalid_phone`, `invalid_address`, `invalid_when`, `invalid_coordinates`, `too_long`, ...). Тело до 64 КБ, до 50 позиций. Больше 10 заказов в минуту с одного IP — `429` |
 | `GET /api/orders/{token}` | заказ для гостя по публичному токену: состав, суммы, статус и история этапов. `404`, если токена нет |
+| `POST /api/orders/{token}/pay` | начать онлайн-оплату заказа через Сбер. Возвращает `{form_url}` — ссылку на платёжную форму. Если Сбер не настроен — `503`; если заказ не онлайн/нельзя оплатить — `409` |
+| `POST /api/payments/sber/callback` | уведомление от Сбера. Всегда отвечает `200`, статус перепроверяется в фоне через `getOrderStatusExtended` |
+| `GET /api/payments/sber/return?token=...` | возврат гостя со страницы оплаты: перепроверяем статус и ведём на `PUBLIC_BASE_URL/order/{token}` |
+
+### Проверка оплаты на тестовом контуре Сбера
+
+Нужны тестовые логин/пароль эквайринга (кладёт владелец) и корневой сертификат НУЦ Минцифры.
+
+```bash
+# в backend/.env заполнить SBER_USERNAME, SBER_PASSWORD, SBER_CA_FILE (путь к сертификату
+# Russian Trusted Root CA с gosuslugi.ru/crt), SBER_RETURN_URL, PUBLIC_BASE_URL.
+make db-up && make run &
+make db-seed
+# создать онлайн-заказ (payment_method=online, нужен email):
+curl -X POST http://localhost:8080/api/orders -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"fulfillment":"pickup","payment_method":"online","name":"Иван","phone":"89991234567","email":"you@example.com","items":[{"dish_id":1,"qty":1}]}'
+# начать оплату (token из ответа) → получить form_url:
+curl -X POST http://localhost:8080/api/orders/<token>/pay
+# открыть form_url в браузере и оплатить тестовой картой из docs/payments-sber.md
+# (например МИР 2202 2050 0001 2424, 05/35, CVC 669). После оплаты вернётесь на страницу заказа.
+curl http://localhost:8080/api/orders/<token>   # статус станет paid
+```
+
+Без `SBER_USERNAME` онлайн-оплата отключена: `POST /.../pay` отвечает `503`, остальной сайт работает.
 
 Примеры:
 ```bash
