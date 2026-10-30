@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -21,6 +22,8 @@ import (
 	"venskoe/backend/internal/httpapi"
 	"venskoe/backend/internal/menu"
 	"venskoe/backend/internal/orders"
+	"venskoe/backend/internal/payments"
+	"venskoe/backend/internal/sber"
 	"venskoe/backend/migrations"
 )
 
@@ -73,6 +76,32 @@ func run() error {
 
 	deliverySvc := delivery.NewService(delivery.NewStore(pool), chita)
 
+	// Клиент Сбера создаём только если эквайринг настроен (есть логин). Иначе онлайн-оплата
+	// выключена, остальной сайт работает.
+	sberEnabled := cfg.SberEnabled()
+	var sberClient payments.SberClient
+	if sberEnabled {
+		client, err := sber.New(sber.Config{
+			BaseURL:  cfg.Sber.BaseURL,
+			Username: cfg.Sber.Username,
+			Password: cfg.Sber.Password,
+			CAFile:   cfg.Sber.CAFile,
+			Fiscal: sber.FiscalConfig{
+				FFDVersion: cfg.Sber.FFDVersion,
+				TaxSystem:  cfg.Sber.TaxSystem,
+				INN:        cfg.Sber.INN,
+				VAT:        cfg.Sber.VAT,
+			},
+		}, log)
+		if err != nil {
+			return err
+		}
+		sberClient = client
+	} else {
+		log.Warn("Сбер не настроен (нет SBER_USERNAME): онлайн-оплата отключена")
+	}
+	paymentsSvc := payments.NewService(pool, sberClient, cfg.Sber.ReturnURL, cfg.Sber.FailURL, cfg.PublicBaseURL, sberEnabled)
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewHandler(httpapi.Deps{
@@ -83,12 +112,25 @@ func run() error {
 			Delivery:       deliverySvc,
 			Address:        delivery.NewDaData(cfg.DaDataAPIKey, "", nil),
 			Orders:         orders.NewService(pool, deliverySvc),
+			Payments:       paymentsSvc,
 			TrustedProxies: trustedProxies,
+			PublicBaseURL:  cfg.PublicBaseURL,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
+	}
+
+	// Фоновые задачи оплаты: сверка статусов и автоотмена неоплаченных. Запускаются только
+	// при настроенном Сбере и останавливаются вместе с сервером по SIGTERM.
+	var wg sync.WaitGroup
+	if sberEnabled {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runPaymentJobs(ctx, log, paymentsSvc)
+		}()
 	}
 
 	errCh := make(chan error, 1)
@@ -109,5 +151,27 @@ func run() error {
 	log.Info("останавливаемся", "timeout", cfg.ShutdownTimeout)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	err = srv.Shutdown(shutdownCtx)
+	wg.Wait() // дожидаемся остановки фоновых задач (ctx уже отменён сигналом)
+	return err
+}
+
+// runPaymentJobs раз в минуту сверяет статусы оплат и отменяет неоплаченные заказы.
+// Завершается, когда ctx отменён (SIGTERM).
+func runPaymentJobs(ctx context.Context, log *slog.Logger, svc *payments.Service) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := svc.ReconcilePending(ctx); err != nil && ctx.Err() == nil {
+				log.Error("фоновая сверка оплат", "err", err)
+			}
+			if err := svc.AutoCancel(ctx, time.Now()); err != nil && ctx.Err() == nil {
+				log.Error("автоотмена неоплаченных", "err", err)
+			}
+		}
+	}
 }
