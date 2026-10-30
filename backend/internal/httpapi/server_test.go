@@ -14,6 +14,7 @@ import (
 
 	"venskoe/backend/internal/delivery"
 	"venskoe/backend/internal/menu"
+	"venskoe/backend/internal/orders"
 )
 
 func discardLogger() *slog.Logger {
@@ -334,5 +335,153 @@ func TestAddressSuggestUnavailable(t *testing.T) {
 	}
 	if body.Error.Code != "address_unavailable" {
 		t.Errorf("код ошибки %q, ждали address_unavailable", body.Error.Code)
+	}
+}
+
+// --- Заказы ---
+
+type fakeOrders struct {
+	created    orders.Created
+	guest      orders.GuestOrder
+	createErr  error
+	byTokenErr error
+}
+
+func (f fakeOrders) Create(context.Context, orders.CreateInput) (orders.Created, error) {
+	return f.created, f.createErr
+}
+
+func (f fakeOrders) ByToken(context.Context, string) (orders.GuestOrder, error) {
+	return f.guest, f.byTokenErr
+}
+
+// ordersDeps собирает зависимости с нужной заглушкой заказов; остальные — пустые.
+func ordersDeps(o OrderService) Deps {
+	return Deps{
+		Log: discardLogger(), Version: "test",
+		DB: fakeDB{}, Menu: fakeMenu{}, Delivery: fakeDelivery{}, Address: fakeAddress{}, Orders: o,
+	}
+}
+
+const validOrderBody = `{"fulfillment":"delivery","payment_method":"on_delivery","name":"Иван","phone":"89991234567","lat":52.0,"lon":113.5,"items":[{"dish_id":1,"qty":1}]}`
+
+func orderRequest(body string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/api/orders", strings.NewReader(body))
+	req.Header.Set("Idempotency-Key", "11111111-1111-1111-1111-111111111111")
+	return req
+}
+
+func TestCreateOrder(t *testing.T) {
+	stub := fakeOrders{created: orders.Created{Token: "tok123", Number: 1001, Status: "accepted", TotalKop: 113000}}
+	h := NewHandler(ordersDeps(stub))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, orderRequest(validOrderBody))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("код ответа %d, ждали 201", rec.Code)
+	}
+	var got orders.Created
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("ответ не JSON: %v", err)
+	}
+	if got.Token != "tok123" || got.Number != 1001 || got.TotalKop != 113000 {
+		t.Errorf("неожиданный ответ: %+v", got)
+	}
+}
+
+func TestCreateOrderValidation(t *testing.T) {
+	dishID := int64(5)
+	stub := fakeOrders{createErr: orders.ValidationErrors{
+		{Code: "dish_unavailable", DishID: &dishID},
+		{Code: "below_minimum"},
+	}}
+	h := NewHandler(ordersDeps(stub))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, orderRequest(validOrderBody))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("код ответа %d, ждали 422", rec.Code)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		Errors []struct {
+			Code   string `json:"code"`
+			DishID *int64 `json:"dish_id"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("ответ не JSON: %v", err)
+	}
+	if body.Error.Code != "validation_failed" || len(body.Errors) != 2 {
+		t.Fatalf("неожиданный ответ: %+v", body)
+	}
+	if body.Errors[0].Code != "dish_unavailable" || body.Errors[0].DishID == nil || *body.Errors[0].DishID != 5 {
+		t.Errorf("ждали dish_unavailable с id 5: %+v", body.Errors[0])
+	}
+}
+
+func TestCreateOrderMissingIdempotencyKey(t *testing.T) {
+	h := NewHandler(ordersDeps(fakeOrders{}))
+
+	rec := httptest.NewRecorder()
+	// Без заголовка Idempotency-Key.
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/orders", strings.NewReader(validOrderBody)))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("код ответа %d, ждали 400", rec.Code)
+	}
+}
+
+func TestCreateOrderRateLimited(t *testing.T) {
+	stub := fakeOrders{created: orders.Created{Token: "tok", Number: 1}}
+	h := NewHandler(ordersDeps(stub))
+
+	// Первые maxOrdersPerMinute запросов проходят, следующий получает 429.
+	for i := range maxOrdersPerMinute {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, orderRequest(validOrderBody))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("запрос %d: код %d, ждали 201", i+1, rec.Code)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, orderRequest(validOrderBody))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("код ответа %d, ждали 429", rec.Code)
+	}
+}
+
+func TestGetOrder(t *testing.T) {
+	stub := fakeOrders{guest: orders.GuestOrder{Token: "tok123", Number: 1001, Status: "accepted"}}
+	h := NewHandler(ordersDeps(stub))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/orders/tok123", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("код ответа %d, ждали 200", rec.Code)
+	}
+	var got orders.GuestOrder
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("ответ не JSON: %v", err)
+	}
+	if got.Token != "tok123" || got.Number != 1001 {
+		t.Errorf("неожиданный ответ: %+v", got)
+	}
+}
+
+func TestGetOrderNotFound(t *testing.T) {
+	stub := fakeOrders{byTokenErr: orders.ErrOrderNotFound}
+	h := NewHandler(ordersDeps(stub))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/orders/nope", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("код ответа %d, ждали 404", rec.Code)
 	}
 }
