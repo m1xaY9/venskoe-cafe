@@ -247,6 +247,39 @@ func TestServiceQuoteUsesChitaTimezone(t *testing.T) {
 	}
 }
 
+func TestServiceOpenAt(t *testing.T) {
+	loc := time.UTC
+	wd := time.Date(2026, 10, 26, 0, 0, 0, 0, loc).Weekday()
+	store := fakeStore{
+		settings: Settings{LastOrderBeforeCloseMin: 30},
+		hours:    []DayHours{{Weekday: int(wd), IsOpen: true, OpenAt: "10:00", CloseAt: "22:00"}},
+	}
+	svc := NewService(store, loc)
+	ctx := context.Background()
+	at := func(h, m int) time.Time { return time.Date(2026, 10, 26, h, m, 0, 0, loc) }
+
+	cases := []struct {
+		name string
+		t    time.Time
+		want bool
+	}{
+		{"днём открыто", at(12, 0), true},
+		{"до открытия", at(9, 0), false},
+		{"после стоп-приёма", at(21, 45), false}, // 22:00 минус 30 минут
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := svc.OpenAt(ctx, tc.t)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Errorf("OpenAt = %v, ждали %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestServiceInfo(t *testing.T) {
 	loc := time.UTC
 	wd := time.Date(2026, 10, 26, 0, 0, 0, 0, loc).Weekday()

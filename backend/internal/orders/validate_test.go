@@ -1,6 +1,31 @@
 package orders
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestWhenTimingOK(t *testing.T) {
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		when time.Time
+		want bool
+	}{
+		{"за 29 минут — рано", now.Add(29 * time.Minute), false},
+		{"через 31 минуту — ок", now.Add(31 * time.Minute), true},
+		{"почти через 7 дней — ок", now.Add(7*24*time.Hour - time.Minute), true},
+		{"позже 7 дней — нельзя", now.Add(7*24*time.Hour + time.Minute), false},
+		{"в прошлом — нельзя", now.Add(-time.Hour), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := whenTimingOK(tc.when, now); got != tc.want {
+				t.Errorf("whenTimingOK = %v, ждали %v", got, tc.want)
+			}
+		})
+	}
+}
 
 func hasCode(verrs ValidationErrors, code string) bool {
 	for _, fe := range verrs {

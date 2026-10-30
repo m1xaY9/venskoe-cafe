@@ -264,6 +264,20 @@ func (s *Service) PriceOrder(ctx context.Context, now time.Time, in OrderPricing
 	return OrderPricingResult{DeliveryKop: price, ZoneID: &id, ZoneName: zone.Name}, nil
 }
 
+// OpenAt говорит, работает ли кафе в момент t (с учётом last_order_before_close_min).
+// t переводится в часовой пояс кафе внутри. Нужно для заказов на конкретное время.
+func (s *Service) OpenAt(ctx context.Context, t time.Time) (bool, error) {
+	settings, err := s.store.Settings(ctx)
+	if err != nil {
+		return false, err
+	}
+	hours, err := s.store.WorkHours(ctx)
+	if err != nil {
+		return false, err
+	}
+	return openNow(t.In(s.loc), hoursByWeekday(hours), settings.LastOrderBeforeCloseMin), nil
+}
+
 // findZone возвращает активную зону, в которую попал адрес. Если зон несколько,
 // берём первую — zones должны прийти отсортированными по sort, поэтому это зона
 // с наименьшим sort.

@@ -139,6 +139,43 @@ func TestCreateOrder(t *testing.T) {
 	}
 }
 
+func TestCreateOrderScheduled(t *testing.T) {
+	pool := setupOrders(t)
+	svc := newTestService(pool)
+	ctx := context.Background()
+	// now зафиксирован на 2026-10-26 12:00 UTC; часы работы в seed — круглосуточно.
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+
+	// Заказ на 14:00 того же дня — в окне и в часах работы.
+	okWhen := time.Date(2026, 10, 26, 14, 0, 0, 0, time.UTC)
+	in := deliveryOrderInput("key-when-ok")
+	in.WhenAsap = false
+	in.WhenAt = &okWhen
+	if _, err := svc.Create(ctx, in); err != nil {
+		t.Fatalf("валидный when_at должен пройти: %v", err)
+	}
+
+	// Заказ через 10 минут — слишком рано → invalid_when.
+	tooSoon := now.Add(10 * time.Minute)
+	in2 := deliveryOrderInput("key-when-soon")
+	in2.WhenAsap = false
+	in2.WhenAt = &tooSoon
+	_, err := svc.Create(ctx, in2)
+	var verrs ValidationErrors
+	if !errors.As(err, &verrs) || !hasCode(verrs, "invalid_when") {
+		t.Fatalf("ждали invalid_when, получили %v", err)
+	}
+
+	// when_asap=false без when_at → invalid_when.
+	in3 := deliveryOrderInput("key-when-nil")
+	in3.WhenAsap = false
+	in3.WhenAt = nil
+	_, err = svc.Create(ctx, in3)
+	if !errors.As(err, &verrs) || !hasCode(verrs, "invalid_when") {
+		t.Fatalf("ждали invalid_when при отсутствии when_at, получили %v", err)
+	}
+}
+
 func TestCreateOrderStopListDish(t *testing.T) {
 	pool := setupOrders(t)
 	svc := newTestService(pool)

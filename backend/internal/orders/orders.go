@@ -82,9 +82,11 @@ func subtotal(items []pricedItem) int64 {
 	return sum
 }
 
-// DeliveryPricer считает доставку по адресу и сумме. За ним стоит delivery.Service.
+// DeliveryPricer считает доставку по адресу и сумме и проверяет часы работы. За ним
+// стоит delivery.Service.
 type DeliveryPricer interface {
 	PriceOrder(ctx context.Context, now time.Time, in delivery.OrderPricing) (delivery.OrderPricingResult, error)
+	OpenAt(ctx context.Context, t time.Time) (bool, error)
 }
 
 // Service создаёт и выдаёт заказы.
@@ -127,6 +129,26 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 	verrs = append(verrs, dishErrs...)
 	sub := subtotal(priced)
 
+	// Время заказа. asap — считаем по текущему времени; заказ на время (when_at) должен
+	// быть в окне [now+30мин, now+7дней] и попадать в часы работы того дня.
+	effectiveTime := s.now()
+	if !in.WhenAsap {
+		switch {
+		case in.WhenAt == nil || !whenTimingOK(*in.WhenAt, s.now()):
+			verrs.add("invalid_when", "when_at")
+		default:
+			open, err := s.delivery.OpenAt(ctx, *in.WhenAt)
+			if err != nil {
+				return Created{}, fmt.Errorf("orders: проверка часов работы: %w", err)
+			}
+			if open {
+				effectiveTime = *in.WhenAt
+			} else {
+				verrs.add("invalid_when", "when_at")
+			}
+		}
+	}
+
 	// Доставка/самовывоз: зона, минимум, часы работы. Считает пакет delivery.
 	var deliveryKop int64
 	var zoneID *int64
@@ -138,7 +160,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 		if in.Lon != nil {
 			op.Lon = *in.Lon
 		}
-		res, err := s.delivery.PriceOrder(ctx, s.now(), op)
+		res, err := s.delivery.PriceOrder(ctx, effectiveTime, op)
 		if err != nil {
 			return Created{}, fmt.Errorf("orders: расчёт доставки: %w", err)
 		}
@@ -262,6 +284,12 @@ func validateFields(in *CreateInput) ValidationErrors {
 	}
 
 	return verrs
+}
+
+// whenTimingOK проверяет, что время заказа не раньше чем через 30 минут и не позже чем
+// через 7 дней от now. Попадание в часы работы проверяется отдельно, через delivery.
+func whenTimingOK(whenAt, now time.Time) bool {
+	return !whenAt.Before(now.Add(30*time.Minute)) && !whenAt.After(now.Add(7*24*time.Hour))
 }
 
 func validCoordinates(lat, lon *float64) bool {
