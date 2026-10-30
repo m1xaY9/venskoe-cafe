@@ -29,7 +29,11 @@ func (d Deps) createOrder(w http.ResponseWriter, r *http.Request, limiter *rateL
 		writeError(w, http.StatusBadRequest, "idempotency_key_required", "Нужен заголовок Idempotency-Key")
 		return
 	}
-	if !limiter.allow(clientIP(r), time.Now()) {
+	if !isUUID(key) {
+		writeError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key должен быть UUID")
+		return
+	}
+	if !limiter.allow(clientIP(r, d.TrustedProxies), time.Now()) {
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "Слишком много заказов, попробуйте через минуту")
 		return
 	}
@@ -120,12 +124,97 @@ func (d Deps) getOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, order)
 }
 
-// clientIP достаёт IP гостя из адреса соединения. За обратным прокси (Caddy) позже можно
-// будет доверять X-Forwarded-For; пока берём адрес напрямую.
-func clientIP(r *http.Request) string {
+// clientIP определяет IP гостя. Если соединение пришло от доверенного прокси, берём
+// самый правый адрес из X-Forwarded-For, не входящий в доверенные прокси (его труднее
+// подделать). Иначе — адрес самого соединения.
+func clientIP(r *http.Request, trusted []*net.IPNet) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+
+	remote := net.ParseIP(host)
+	if remote == nil || !ipInAny(remote, trusted) {
+		return host
+	}
+
+	for _, raw := range splitForwardedFor(r.Header.Values("X-Forwarded-For")) {
+		ip := net.ParseIP(raw)
+		if ip == nil {
+			continue
+		}
+		if !ipInAny(ip, trusted) {
+			return ip.String()
+		}
 	}
 	return host
+}
+
+// splitForwardedFor разбирает заголовки X-Forwarded-For (могут повторяться и содержать
+// список через запятую) в срез адресов по порядку, слева направо.
+func splitForwardedFor(headers []string) []string {
+	var out []string
+	for _, h := range headers {
+		for _, part := range strings.Split(h, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	// Идём справа налево: правее — ближе к нашему прокси, их труднее подделать.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+func ipInAny(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseCIDRs превращает список CIDR в сети. Ошибку возвращает на первом неверном значении.
+// Нужна в main для разбора TRUSTED_PROXIES.
+func ParseCIDRs(cidrs []string) ([]*net.IPNet, error) {
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			return nil, err
+		}
+		nets = append(nets, n)
+	}
+	return nets, nil
+}
+
+// isUUID проверяет, что строка — UUID вида 8-4-4-4-12 из hex-символов.
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if !isHexDigit(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isHexDigit(r rune) bool {
+	return (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
 }

@@ -449,6 +449,19 @@ func TestCreateOrderMissingIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestCreateOrderInvalidIdempotencyKey(t *testing.T) {
+	h := NewHandler(ordersDeps(fakeOrders{}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/orders", strings.NewReader(validOrderBody))
+	req.Header.Set("Idempotency-Key", "not-a-uuid")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("код ответа %d, ждали 400", rec.Code)
+	}
+}
+
 func TestCreateOrderRateLimited(t *testing.T) {
 	stub := fakeOrders{created: orders.Created{Token: "tok", Number: 1}}
 	h := NewHandler(ordersDeps(stub))

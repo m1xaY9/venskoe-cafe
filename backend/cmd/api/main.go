@@ -66,18 +66,24 @@ func run() error {
 	}
 	log.Info("база готова, миграции применены")
 
+	trustedProxies, err := httpapi.ParseCIDRs(cfg.TrustedProxies)
+	if err != nil {
+		return fmt.Errorf("TRUSTED_PROXIES: %w", err)
+	}
+
 	deliverySvc := delivery.NewService(delivery.NewStore(pool), chita)
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewHandler(httpapi.Deps{
-			Log:      log,
-			Version:  version,
-			DB:       pool,
-			Menu:     menu.NewStore(pool),
-			Delivery: deliverySvc,
-			Address:  delivery.NewDaData(cfg.DaDataAPIKey, "", nil),
-			Orders:   orders.NewService(pool, deliverySvc),
+			Log:            log,
+			Version:        version,
+			DB:             pool,
+			Menu:           menu.NewStore(pool),
+			Delivery:       deliverySvc,
+			Address:        delivery.NewDaData(cfg.DaDataAPIKey, "", nil),
+			Orders:         orders.NewService(pool, deliverySvc),
+			TrustedProxies: trustedProxies,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

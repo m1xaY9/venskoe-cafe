@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"time"
@@ -49,6 +50,8 @@ type Deps struct {
 	Delivery DeliveryService
 	Address  AddressSuggester
 	Orders   OrderService
+	// TrustedProxies — доверенные прокси для чтения X-Forwarded-For при определении IP.
+	TrustedProxies []*net.IPNet
 }
 
 func NewHandler(d Deps) http.Handler {
