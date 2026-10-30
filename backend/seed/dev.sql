@@ -1,6 +1,7 @@
 BEGIN;
 
-TRUNCATE dishes, categories RESTART IDENTITY;
+-- CASCADE заодно чистит зависимые заказы (order_items ссылается на dishes).
+TRUNCATE dishes, categories RESTART IDENTITY CASCADE;
 
 INSERT INTO categories (slug, title, sort) VALUES
     ('zavtraki', 'Завтраки', 10),
@@ -31,27 +32,38 @@ INSERT INTO dishes (category_id, title, description, portion, price_kop, sort) V
 
 UPDATE dishes SET is_available = false WHERE title = 'Гуляш по-венски';
 
--- Доставка: строки cafe_settings и work_hours создаёт миграция 00003, здесь только
--- задаём им значения для локальной разработки (UPDATE, не TRUNCATE). Зоны — чисто
--- тестовые данные, их наполняем сами. Все значения ниже — ЗАГЛУШКИ, реальные нужно
--- взять у владельца (см. раздел «Нужно от владельца» в PR).
-UPDATE cafe_settings SET
-    delivery_enabled = true,
-    pickup_enabled = true,
-    pickup_address = 'Чита, ул. Ленина, 1 (ЗАГЛУШКА)',
-    pickup_min_order_kop = 50000,
-    last_order_before_close_min = 30
-WHERE id = 1;
+-- Доставка: строки cafe_settings и work_hours создаёт миграция 00003. Здесь задаём им
+-- значения для разработки через INSERT ... ON CONFLICT DO UPDATE — так seed восстановит
+-- все 7 дней, даже если интеграционный тест delivery оставил в work_hours лишь пару строк.
+-- Зоны — чисто тестовые данные, их наполняем сами. Все значения ниже — ЗАГЛУШКИ,
+-- реальные нужно взять у владельца (см. раздел «Нужно от владельца» в PR).
+INSERT INTO cafe_settings (id, delivery_enabled, pickup_enabled, pickup_address, pickup_min_order_kop, last_order_before_close_min)
+VALUES (1, true, true, 'Чита, ул. Ленина, 1 (ЗАГЛУШКА)', 50000, 30)
+ON CONFLICT (id) DO UPDATE SET
+    delivery_enabled = EXCLUDED.delivery_enabled,
+    pickup_enabled = EXCLUDED.pickup_enabled,
+    pickup_address = EXCLUDED.pickup_address,
+    pickup_min_order_kop = EXCLUDED.pickup_min_order_kop,
+    last_order_before_close_min = EXCLUDED.last_order_before_close_min;
 
 -- weekday как в Go time.Weekday: 0 — воскресенье, 1 — понедельник ... 6 — суббота.
-UPDATE work_hours SET is_open = true, open_at = '10:00', close_at = '22:00' WHERE weekday BETWEEN 1 AND 4;
-UPDATE work_hours SET is_open = true, open_at = '10:00', close_at = '23:00' WHERE weekday = 5;
-UPDATE work_hours SET is_open = true, open_at = '11:00', close_at = '23:00' WHERE weekday = 6;
-UPDATE work_hours SET is_open = true, open_at = '11:00', close_at = '22:00' WHERE weekday = 0;
+INSERT INTO work_hours (weekday, is_open, open_at, close_at) VALUES
+    (1, true, '10:00', '22:00'),
+    (2, true, '10:00', '22:00'),
+    (3, true, '10:00', '22:00'),
+    (4, true, '10:00', '22:00'),
+    (5, true, '10:00', '23:00'),
+    (6, true, '11:00', '23:00'),
+    (0, true, '11:00', '22:00')
+ON CONFLICT (weekday) DO UPDATE SET
+    is_open = EXCLUDED.is_open,
+    open_at = EXCLUDED.open_at,
+    close_at = EXCLUDED.close_at;
 
 -- Две зоны-заглушки вокруг центра Читы (примерно 52.034, 113.499). Координаты [lon, lat].
 -- «Центр» (sort 10) лежит внутри «Город» (sort 20) — на пересечении берётся зона с меньшим sort.
-TRUNCATE delivery_zones RESTART IDENTITY;
+-- CASCADE заодно чистит заказы, ссылающиеся на зоны (orders.delivery_zone_id).
+TRUNCATE delivery_zones RESTART IDENTITY CASCADE;
 INSERT INTO delivery_zones (name, polygon, delivery_price_kop, min_order_kop, free_from_kop, sort) VALUES
     ('Центр',
      '{"type":"Polygon","coordinates":[[[113.479,52.014],[113.519,52.014],[113.519,52.054],[113.479,52.054],[113.479,52.014]]]}',

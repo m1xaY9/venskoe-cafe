@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"time"
 
 	"venskoe/backend/internal/delivery"
 	"venskoe/backend/internal/menu"
+	"venskoe/backend/internal/orders"
 )
 
 type Pinger interface {
@@ -32,6 +34,12 @@ type AddressSuggester interface {
 	Suggest(ctx context.Context, query string) ([]delivery.Suggestion, error)
 }
 
+// OrderService создаёт и выдаёт заказы. За ним скрыт orders.Service, в тестах — заглушка.
+type OrderService interface {
+	Create(ctx context.Context, in orders.CreateInput) (orders.Created, error)
+	ByToken(ctx context.Context, token string) (orders.GuestOrder, error)
+}
+
 // Deps — зависимости обработчиков. Передаём их одной структурой, чтобы в тестах
 // подставлять заглушки вместо настоящих базы и домена.
 type Deps struct {
@@ -41,6 +49,9 @@ type Deps struct {
 	Menu     MenuProvider
 	Delivery DeliveryService
 	Address  AddressSuggester
+	Orders   OrderService
+	// TrustedProxies — доверенные прокси для чтения X-Forwarded-For при определении IP.
+	TrustedProxies []*net.IPNet
 }
 
 func NewHandler(d Deps) http.Handler {
@@ -75,6 +86,7 @@ func NewHandler(d Deps) http.Handler {
 
 	d.registerDelivery(mux)
 	d.registerAddress(mux)
+	d.registerOrders(mux)
 
 	return recoverPanic(d.Log, logRequests(d.Log, mux))
 }

@@ -8,9 +8,16 @@ import (
 // Коды причин, почему заказать нельзя. Латиницей — для программы на фронте.
 const (
 	ReasonDeliveryDisabled = "delivery_disabled" // доставка временно отключена в настройках
+	ReasonPickupDisabled   = "pickup_disabled"   // самовывоз временно отключён в настройках
 	ReasonOutsideZone      = "outside_zone"      // адрес вне зон доставки
 	ReasonClosed           = "closed"            // кафе сейчас закрыто или приём заказов уже окончен
 	ReasonBelowMinimum     = "below_minimum"     // сумма меньше минимальной для зоны
+)
+
+// Fulfillment — способ получения заказа.
+const (
+	FulfillmentDelivery = "delivery"
+	FulfillmentPickup   = "pickup"
 )
 
 // Settings — настройки кафе (одна строка в cafe_settings).
@@ -190,6 +197,85 @@ func (s *Service) Quote(ctx context.Context, now time.Time, in QuoteInput) (Quot
 		q.CanOrder = true
 	}
 	return q, nil
+}
+
+// OrderPricing — вход для расчёта доставки при оформлении заказа.
+type OrderPricing struct {
+	Fulfillment string // "delivery" | "pickup"
+	Lat, Lon    float64
+	SubtotalKop int64
+}
+
+// OrderPricingResult — что нужно заказу: сколько стоит доставка, в какой зоне и можно
+// ли вообще оформить. Reason пуст, если всё в порядке.
+type OrderPricingResult struct {
+	DeliveryKop int64
+	ZoneID      *int64 // только для доставки; nil для самовывоза или вне зоны
+	ZoneName    string
+	Reason      string
+}
+
+// PriceOrder считает доставку для оформления заказа и проверяет, можно ли его принять
+// сейчас (включён ли способ получения, попадает ли адрес в зону, открыто ли кафе,
+// набрана ли минимальная сумма). В отличие от Quote, отдаёт ID зоны для сохранения.
+func (s *Service) PriceOrder(ctx context.Context, now time.Time, in OrderPricing) (OrderPricingResult, error) {
+	settings, err := s.store.Settings(ctx)
+	if err != nil {
+		return OrderPricingResult{}, err
+	}
+	hours, err := s.store.WorkHours(ctx)
+	if err != nil {
+		return OrderPricingResult{}, err
+	}
+	open := openNow(now.In(s.loc), hoursByWeekday(hours), settings.LastOrderBeforeCloseMin)
+
+	if in.Fulfillment == FulfillmentPickup {
+		switch {
+		case !settings.PickupEnabled:
+			return OrderPricingResult{Reason: ReasonPickupDisabled}, nil
+		case !open:
+			return OrderPricingResult{Reason: ReasonClosed}, nil
+		case in.SubtotalKop < settings.PickupMinOrderKop:
+			return OrderPricingResult{Reason: ReasonBelowMinimum}, nil
+		}
+		return OrderPricingResult{DeliveryKop: 0}, nil
+	}
+
+	// Доставка.
+	if !settings.DeliveryEnabled {
+		return OrderPricingResult{Reason: ReasonDeliveryDisabled}, nil
+	}
+	zones, err := s.store.Zones(ctx)
+	if err != nil {
+		return OrderPricingResult{}, err
+	}
+	zone, ok := findZone(zones, Point{Lon: in.Lon, Lat: in.Lat})
+	if !ok {
+		return OrderPricingResult{Reason: ReasonOutsideZone}, nil
+	}
+	if !open {
+		return OrderPricingResult{Reason: ReasonClosed}, nil
+	}
+	price, _, meets, _ := calcDelivery(zone, in.SubtotalKop)
+	if !meets {
+		return OrderPricingResult{Reason: ReasonBelowMinimum}, nil
+	}
+	id := zone.ID
+	return OrderPricingResult{DeliveryKop: price, ZoneID: &id, ZoneName: zone.Name}, nil
+}
+
+// OpenAt говорит, работает ли кафе в момент t (с учётом last_order_before_close_min).
+// t переводится в часовой пояс кафе внутри. Нужно для заказов на конкретное время.
+func (s *Service) OpenAt(ctx context.Context, t time.Time) (bool, error) {
+	settings, err := s.store.Settings(ctx)
+	if err != nil {
+		return false, err
+	}
+	hours, err := s.store.WorkHours(ctx)
+	if err != nil {
+		return false, err
+	}
+	return openNow(t.In(s.loc), hoursByWeekday(hours), settings.LastOrderBeforeCloseMin), nil
 }
 
 // findZone возвращает активную зону, в которую попал адрес. Если зон несколько,
