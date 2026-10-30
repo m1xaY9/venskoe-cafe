@@ -28,7 +28,7 @@ func TestStoreMenu(t *testing.T) {
 	}
 
 	_, err = pool.Exec(ctx, `
-		TRUNCATE dishes, categories RESTART IDENTITY;
+		TRUNCATE dishes, categories RESTART IDENTITY CASCADE;
 		INSERT INTO categories (slug, title, sort, is_active) VALUES
 			('deserty', 'Десерты', 20, true),
 			('zavtraki', 'Завтраки', 10, true),

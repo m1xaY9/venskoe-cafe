@@ -28,7 +28,7 @@ func TestStore(t *testing.T) {
 	}
 
 	_, err = pool.Exec(ctx, `
-		TRUNCATE delivery_zones RESTART IDENTITY;
+		TRUNCATE delivery_zones RESTART IDENTITY CASCADE;
 		TRUNCATE work_hours;
 		TRUNCATE cafe_settings;
 		INSERT INTO cafe_settings (id, delivery_enabled, pickup_enabled, pickup_address, pickup_min_order_kop, last_order_before_close_min)
