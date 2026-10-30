@@ -46,7 +46,8 @@ var allowedTransitions = map[string][]string{
 	StatusCancelled:       {},
 }
 
-// CanTransition проверяет по таблице, разрешён ли переход from → to.
+// CanTransition проверяет по таблице, разрешён ли переход from → to (без учёта способа
+// получения).
 func CanTransition(from, to string) bool {
 	for _, allowed := range allowedTransitions[from] {
 		if allowed == to {
@@ -54,6 +55,21 @@ func CanTransition(from, to string) bool {
 		}
 	}
 	return false
+}
+
+// CanTransitionFor учитывает способ получения: ready и picked_up только для самовывоза,
+// delivering и delivered только для доставки.
+func CanTransitionFor(from, to, fulfillment string) bool {
+	if !CanTransition(from, to) {
+		return false
+	}
+	switch to {
+	case StatusReady, StatusPickedUp:
+		return fulfillment == FulfillmentPickup
+	case StatusDelivering, StatusDelivered:
+		return fulfillment == FulfillmentDelivery
+	}
+	return true
 }
 
 var (
@@ -65,8 +81,9 @@ var (
 // заказа (FOR UPDATE), проверяет переход по таблице и пишет событие в order_events —
 // всё в одной транзакции со сменой статуса.
 func Transition(ctx context.Context, tx pgx.Tx, orderID int64, to, actor, reason string) error {
-	var from string
-	err := tx.QueryRow(ctx, `SELECT status FROM orders WHERE id = $1 FOR UPDATE`, orderID).Scan(&from)
+	var from, fulfillment string
+	err := tx.QueryRow(ctx, `SELECT status, fulfillment FROM orders WHERE id = $1 FOR UPDATE`, orderID).
+		Scan(&from, &fulfillment)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrOrderNotFound
 	}
@@ -74,8 +91,8 @@ func Transition(ctx context.Context, tx pgx.Tx, orderID int64, to, actor, reason
 		return fmt.Errorf("orders: чтение статуса: %w", err)
 	}
 
-	if !CanTransition(from, to) {
-		return fmt.Errorf("%w: %s → %s", ErrForbiddenTransition, from, to)
+	if !CanTransitionFor(from, to, fulfillment) {
+		return fmt.Errorf("%w: %s → %s (%s)", ErrForbiddenTransition, from, to, fulfillment)
 	}
 
 	if _, err := tx.Exec(ctx, `UPDATE orders SET status = $1, updated_at = now() WHERE id = $2`, to, orderID); err != nil {

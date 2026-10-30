@@ -34,6 +34,32 @@ func TestCanTransitionForbidden(t *testing.T) {
 	}
 }
 
+func TestCanTransitionForFulfillment(t *testing.T) {
+	cases := []struct {
+		from, to, fulfillment string
+		want                  bool
+	}{
+		// Доставка: путь delivering/delivered разрешён, ready/picked_up — нет.
+		{StatusCooking, StatusDelivering, FulfillmentDelivery, true},
+		{StatusDelivering, StatusDelivered, FulfillmentDelivery, true},
+		{StatusCooking, StatusReady, FulfillmentDelivery, false},
+		{StatusReady, StatusPickedUp, FulfillmentDelivery, false},
+		// Самовывоз: путь ready/picked_up разрешён, delivering/delivered — нет.
+		{StatusCooking, StatusReady, FulfillmentPickup, true},
+		{StatusReady, StatusPickedUp, FulfillmentPickup, true},
+		{StatusCooking, StatusDelivering, FulfillmentPickup, false},
+		{StatusDelivering, StatusDelivered, FulfillmentPickup, false},
+		// Общие переходы не зависят от способа получения.
+		{StatusCreated, StatusAccepted, FulfillmentPickup, true},
+		{StatusAccepted, StatusCancelled, FulfillmentDelivery, true},
+	}
+	for _, tc := range cases {
+		if got := CanTransitionFor(tc.from, tc.to, tc.fulfillment); got != tc.want {
+			t.Errorf("CanTransitionFor(%s, %s, %s) = %v, ждали %v", tc.from, tc.to, tc.fulfillment, got, tc.want)
+		}
+	}
+}
+
 func TestDeliveryAndPickupPaths(t *testing.T) {
 	// Путь доставки: cooking → delivering → delivered.
 	if !CanTransition(StatusCooking, StatusDelivering) || !CanTransition(StatusDelivering, StatusDelivered) {

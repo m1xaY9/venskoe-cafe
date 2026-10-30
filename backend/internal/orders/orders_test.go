@@ -266,6 +266,46 @@ func TestTransitionIntegration(t *testing.T) {
 	}
 }
 
+func TestTransitionFulfillment(t *testing.T) {
+	pool := setupOrders(t)
+	svc := newTestService(pool)
+	ctx := context.Background()
+
+	// Самовывоз, оплата при получении → заказ в accepted.
+	in := deliveryOrderInput("key-ful")
+	in.Fulfillment = FulfillmentPickup
+	created, err := svc.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	var orderID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM orders WHERE public_token = $1`, created.Token).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+
+	// accepted → cooking (общий переход).
+	tx, _ := pool.Begin(ctx)
+	if err := Transition(ctx, tx, orderID, StatusCooking, ActorStaff, ""); err != nil {
+		t.Fatalf("accepted→cooking: %v", err)
+	}
+	_ = tx.Commit(ctx)
+
+	// Для самовывоза cooking → delivering запрещён (это путь доставки).
+	tx, _ = pool.Begin(ctx)
+	err = Transition(ctx, tx, orderID, StatusDelivering, ActorStaff, "")
+	_ = tx.Rollback(ctx)
+	if !errors.Is(err, ErrForbiddenTransition) {
+		t.Fatalf("cooking→delivering для самовывоза должен быть запрещён, got %v", err)
+	}
+
+	// cooking → ready для самовывоза разрешён.
+	tx, _ = pool.Begin(ctx)
+	if err := Transition(ctx, tx, orderID, StatusReady, ActorStaff, ""); err != nil {
+		t.Fatalf("cooking→ready: %v", err)
+	}
+	_ = tx.Commit(ctx)
+}
+
 func TestLoadDishesDBError(t *testing.T) {
 	pool := setupOrders(t)
 
