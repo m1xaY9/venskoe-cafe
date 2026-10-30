@@ -266,6 +266,28 @@ func TestTransitionIntegration(t *testing.T) {
 	}
 }
 
+func TestLoadDishesDBError(t *testing.T) {
+	pool := setupOrders(t)
+
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+
+	// Отменённый контекст — запрос к базе провалится.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, verrs, err := loadDishes(ctx, tx, []ItemInput{{DishID: 1, Qty: 1}})
+	if err == nil {
+		t.Fatal("ждали обычную ошибку базы")
+	}
+	if verrs != nil {
+		t.Errorf("при ошибке базы не должно быть ValidationErrors: %+v", verrs)
+	}
+}
+
 func requireLocalDB(t *testing.T, dbURL string) {
 	t.Helper()
 	u, err := url.Parse(dbURL)

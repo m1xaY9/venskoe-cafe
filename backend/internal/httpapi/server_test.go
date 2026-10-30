@@ -424,6 +424,19 @@ func TestCreateOrderValidation(t *testing.T) {
 	}
 }
 
+func TestCreateOrderInternalError(t *testing.T) {
+	// Обычная (не валидационная) ошибка из сервиса → 500.
+	stub := fakeOrders{createErr: errors.New("база недоступна")}
+	h := NewHandler(ordersDeps(stub))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, orderRequest(validOrderBody))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("код ответа %d, ждали 500", rec.Code)
+	}
+}
+
 func TestCreateOrderMissingIdempotencyKey(t *testing.T) {
 	h := NewHandler(ordersDeps(fakeOrders{}))
 

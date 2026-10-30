@@ -125,7 +125,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 	}
 
 	// Блюда: существуют, доступны, категория активна; qty 1..50.
-	priced, dishErrs := loadDishes(ctx, tx, in.Items)
+	priced, dishErrs, err := loadDishes(ctx, tx, in.Items)
+	if err != nil {
+		return Created{}, err
+	}
 	verrs = append(verrs, dishErrs...)
 	sub := subtotal(priced)
 

@@ -10,10 +10,9 @@ import (
 )
 
 // loadDishes берёт блюда из базы по id из запроса и собирает позиции со снимком
-// названия и цены. Накапливает ошибки по недоступным блюдам и неверному qty.
-func loadDishes(ctx context.Context, tx pgx.Tx, items []ItemInput) ([]pricedItem, ValidationErrors) {
-	var verrs ValidationErrors
-
+// названия и цены. Ошибки по недоступным блюдам и неверному qty возвращает в
+// ValidationErrors; сбой самой базы — обычной error (обработчик ответит 500 и залогирует).
+func loadDishes(ctx context.Context, tx pgx.Tx, items []ItemInput) ([]pricedItem, ValidationErrors, error) {
 	ids := make([]int64, 0, len(items))
 	for _, it := range items {
 		ids = append(ids, it.DishID)
@@ -33,8 +32,7 @@ func loadDishes(ctx context.Context, tx pgx.Tx, items []ItemInput) ([]pricedItem
 		JOIN categories c ON c.id = d.category_id
 		WHERE d.id = ANY($1)`, ids)
 	if err != nil {
-		verrs.add("internal", "")
-		return nil, verrs
+		return nil, nil, fmt.Errorf("orders: чтение блюд: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -43,16 +41,15 @@ func loadDishes(ctx context.Context, tx pgx.Tx, items []ItemInput) ([]pricedItem
 			d  dishRow
 		)
 		if err := rows.Scan(&id, &d.title, &d.priceKop, &d.available, &d.catActive); err != nil {
-			verrs.add("internal", "")
-			return nil, verrs
+			return nil, nil, fmt.Errorf("orders: чтение блюд: %w", err)
 		}
 		byID[id] = d
 	}
 	if err := rows.Err(); err != nil {
-		verrs.add("internal", "")
-		return nil, verrs
+		return nil, nil, fmt.Errorf("orders: чтение блюд: %w", err)
 	}
 
+	var verrs ValidationErrors
 	priced := make([]pricedItem, 0, len(items))
 	for _, it := range items {
 		if it.Qty < 1 || it.Qty > 50 {
@@ -66,7 +63,7 @@ func loadDishes(ctx context.Context, tx pgx.Tx, items []ItemInput) ([]pricedItem
 		}
 		priced = append(priced, pricedItem{DishID: it.DishID, Title: d.title, PriceKop: d.priceKop, Qty: it.Qty})
 	}
-	return priced, verrs
+	return priced, verrs, nil
 }
 
 // insertOrder вставляет заказ. При конфликте по idempotency_key ничего не вставляет и
