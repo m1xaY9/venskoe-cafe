@@ -2,6 +2,53 @@ package orders
 
 import "testing"
 
+func hasCode(verrs ValidationErrors, code string) bool {
+	for _, fe := range verrs {
+		if fe.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func TestValidateFieldsTrimAndAddress(t *testing.T) {
+	lat, lon := 52.0, 113.5
+
+	// Доставка без адреса (одни пробелы) → invalid_address, имя обрезается.
+	in := CreateInput{
+		Fulfillment: FulfillmentDelivery, PaymentMethod: PaymentOnDelivery,
+		Name: "  Иван  ", Phone: "89991234567", Address: "   ",
+		Lat: &lat, Lon: &lon, Items: []ItemInput{{DishID: 1, Qty: 1}},
+	}
+	verrs := validateFields(&in)
+	if in.Name != "Иван" {
+		t.Errorf("имя не обрезано: %q", in.Name)
+	}
+	if !hasCode(verrs, "invalid_address") {
+		t.Errorf("ждали invalid_address, получили %+v", verrs)
+	}
+
+	// Адрес с пробелами по краям сохраняется обрезанным, ошибки нет.
+	in2 := in
+	in2.Address = "  ул. Ленина, 1  "
+	verrs2 := validateFields(&in2)
+	if in2.Address != "ул. Ленина, 1" {
+		t.Errorf("адрес не обрезан: %q", in2.Address)
+	}
+	if hasCode(verrs2, "invalid_address") {
+		t.Errorf("не ждали invalid_address: %+v", verrs2)
+	}
+
+	// Для самовывоза адрес не обязателен.
+	pickup := CreateInput{
+		Fulfillment: FulfillmentPickup, PaymentMethod: PaymentOnDelivery,
+		Name: "Иван", Phone: "89991234567", Items: []ItemInput{{DishID: 1, Qty: 1}},
+	}
+	if hasCode(validateFields(&pickup), "invalid_address") {
+		t.Error("для самовывоза адрес не должен требоваться")
+	}
+}
+
 func TestSubtotalAndLineTotal(t *testing.T) {
 	items := []pricedItem{
 		{PriceKop: 39000, Qty: 2}, // 78000

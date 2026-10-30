@@ -217,7 +217,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 func validateFields(in *CreateInput) ValidationErrors {
 	var verrs ValidationErrors
 
-	if strings.TrimSpace(in.Name) == "" {
+	// Имя и адрес сохраняем обрезанными по пробелам.
+	in.Name = strings.TrimSpace(in.Name)
+	in.Address = strings.TrimSpace(in.Address)
+
+	if in.Name == "" {
 		verrs.add("invalid_name", "name")
 	}
 
@@ -248,8 +252,13 @@ func validateFields(in *CreateInput) ValidationErrors {
 		verrs.add("empty_order", "items")
 	}
 
-	if in.Fulfillment == FulfillmentDelivery && !validCoordinates(in.Lat, in.Lon) {
-		verrs.add("invalid_coordinates", "lat")
+	if in.Fulfillment == FulfillmentDelivery {
+		if !validCoordinates(in.Lat, in.Lon) {
+			verrs.add("invalid_coordinates", "lat")
+		}
+		if in.Address == "" {
+			verrs.add("invalid_address", "address")
+		}
 	}
 
 	return verrs
