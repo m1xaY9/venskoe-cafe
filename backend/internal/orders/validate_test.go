@@ -1,9 +1,52 @@
 package orders
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestValidateFieldsTooLong(t *testing.T) {
+	base := CreateInput{
+		Fulfillment: FulfillmentPickup, PaymentMethod: PaymentOnDelivery,
+		Phone: "89991234567", Items: []ItemInput{{DishID: 1, Qty: 1}},
+	}
+
+	// Слишком длинное имя.
+	in := base
+	in.Name = strings.Repeat("я", 101)
+	if !hasCode(validateFields(&in), "too_long") {
+		t.Error("ждали too_long для длинного имени")
+	}
+
+	// Слишком длинный комментарий.
+	in2 := base
+	in2.Name = "Иван"
+	in2.Comment = strings.Repeat("x", 501)
+	verrs := validateFields(&in2)
+	if !hasCode(verrs, "too_long") {
+		t.Error("ждали too_long для длинного комментария")
+	}
+
+	// Больше 50 позиций.
+	in3 := base
+	in3.Name = "Иван"
+	in3.Items = make([]ItemInput, 51)
+	for i := range in3.Items {
+		in3.Items[i] = ItemInput{DishID: 1, Qty: 1}
+	}
+	if !hasCode(validateFields(&in3), "too_long") {
+		t.Error("ждали too_long для более 50 позиций")
+	}
+
+	// Нормальные значения — too_long нет.
+	in4 := base
+	in4.Name = "Иван"
+	in4.Comment = "без спешки"
+	if hasCode(validateFields(&in4), "too_long") {
+		t.Error("для нормальных полей too_long быть не должно")
+	}
+}
 
 func TestWhenTimingOK(t *testing.T) {
 	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)

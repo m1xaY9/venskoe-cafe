@@ -481,6 +481,19 @@ func TestCreateOrderRateLimited(t *testing.T) {
 	}
 }
 
+func TestCreateOrderBodyTooLarge(t *testing.T) {
+	h := NewHandler(ordersDeps(fakeOrders{}))
+
+	// Тело больше 64 КБ — MaxBytesReader оборвёт чтение, обработчик ответит 400.
+	big := `{"name":"` + strings.Repeat("a", 70000) + `","items":[]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, orderRequest(big))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("код ответа %d, ждали 400", rec.Code)
+	}
+}
+
 func TestGetOrder(t *testing.T) {
 	stub := fakeOrders{guest: orders.GuestOrder{Token: "tok123", Number: 1001, Status: "accepted"}}
 	h := NewHandler(ordersDeps(stub))

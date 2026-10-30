@@ -38,6 +38,9 @@ func (d Deps) createOrder(w http.ResponseWriter, r *http.Request, limiter *rateL
 		return
 	}
 
+	// Тело заказа небольшое; ограничиваем 64 КБ, чтобы не читать мусор в память.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 

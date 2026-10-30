@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"venskoe/backend/internal/delivery"
 
@@ -20,6 +21,9 @@ const (
 	PaymentOnline       = "online"
 	PaymentOnDelivery   = "on_delivery"
 )
+
+// maxItems — максимум позиций в одном заказе.
+const maxItems = 50
 
 // ItemInput — позиция из запроса гостя: что и сколько. Цену гость не присылает.
 type ItemInput struct {
@@ -276,6 +280,24 @@ func validateFields(in *CreateInput) ValidationErrors {
 	if len(in.Items) == 0 {
 		verrs.add("empty_order", "items")
 	}
+	if len(in.Items) > maxItems {
+		verrs.add("too_long", "items")
+	}
+
+	// Ограничения длины полей (в символах), чтобы в базу не попадали огромные строки.
+	checkLen := func(field, value string, max int) {
+		if utf8.RuneCountInString(value) > max {
+			verrs.add("too_long", field)
+		}
+	}
+	checkLen("name", in.Name, 100)
+	checkLen("address", in.Address, 300)
+	checkLen("entrance", in.Entrance, 20)
+	checkLen("floor", in.Floor, 20)
+	checkLen("flat", in.Flat, 20)
+	checkLen("comment", in.Comment, 500)
+	checkLen("courier_comment", in.CourierComment, 500)
+	checkLen("email", in.Email, 254)
 
 	if in.Fulfillment == FulfillmentDelivery {
 		if !validCoordinates(in.Lat, in.Lon) {
