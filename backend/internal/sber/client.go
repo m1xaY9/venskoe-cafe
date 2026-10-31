@@ -22,6 +22,8 @@ type Config struct {
 	Password string
 	CAFile   string
 	Fiscal   FiscalConfig
+	// FiscalReady — заданы ли реквизиты чека (решает вызывающий код, т.к. VAT=0 валиден).
+	FiscalReady bool
 }
 
 // FiscalConfig — реквизиты чека 54-ФЗ из настроек (уточняются у владельца).
@@ -67,9 +69,6 @@ func New(cfg Config, log *slog.Logger) (*Client, error) {
 		},
 	}
 
-	fiscalReady := cfg.Fiscal.FFDVersion != "" && cfg.Fiscal.TaxSystem != "" &&
-		cfg.Fiscal.INN != "" && cfg.Fiscal.VAT > 0
-
 	return &Client{
 		baseURL:     cfg.BaseURL,
 		username:    cfg.Username,
@@ -77,7 +76,7 @@ func New(cfg Config, log *slog.Logger) (*Client, error) {
 		http:        httpClient,
 		log:         log,
 		fiscal:      cfg.Fiscal,
-		fiscalReady: fiscalReady,
+		fiscalReady: cfg.FiscalReady,
 	}, nil
 }
 

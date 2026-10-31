@@ -49,22 +49,41 @@ type SberConfig struct {
 	// обязательны, локально без них просто не передаём orderBundle.
 	FFDVersion string `env:"SBER_FFD_VERSION"`
 	TaxSystem  string `env:"SBER_TAX_SYSTEM"`
-	VAT        int    `env:"SBER_VAT"`
-	INN        string `env:"SBER_INN"`
+	// VAT — тип НДС (taxType, тег ФФД 1199). Указатель, чтобы отличить «не задано» (nil)
+	// от валидного 0 («без НДС»). Допустимы значения 0..13 (см. docs/sber-ecom-api.yaml).
+	VAT *int   `env:"SBER_VAT"`
+	INN string `env:"SBER_INN"`
 }
+
+// maxTaxType — верхняя граница taxType по спецификации (0 = без НДС ... 13).
+const maxTaxType = 13
 
 // SberEnabled — настроен ли эквайринг (есть логин).
 func (c Config) SberEnabled() bool {
 	return c.Sber.Username != ""
 }
 
-// FiscalReady — заданы ли все реквизиты чека 54-ФЗ.
+// FiscalReady — заданы ли все реквизиты чека 54-ФЗ (VAT считается заданным, если не nil,
+// в том числе 0 — «без НДС»).
 func (c Config) FiscalReady() bool {
-	return c.Sber.FFDVersion != "" && c.Sber.TaxSystem != "" && c.Sber.INN != "" && c.Sber.VAT > 0
+	return c.Sber.FFDVersion != "" && c.Sber.TaxSystem != "" && c.Sber.INN != "" && c.Sber.VAT != nil
 }
 
-// validateSber проверяет настройки Сбера для боевого окружения.
+// VATValue возвращает тип НДС (0, если не задан — используется только при FiscalReady).
+func (c Config) VATValue() int {
+	if c.Sber.VAT == nil {
+		return 0
+	}
+	return *c.Sber.VAT
+}
+
+// validateSber проверяет настройки Сбера: диапазон НДС всегда, а в production при включённом
+// Сбере — боевой адрес и полноту реквизитов чека.
 func (c Config) validateSber() error {
+	if c.Sber.VAT != nil && (*c.Sber.VAT < 0 || *c.Sber.VAT > maxTaxType) {
+		return fmt.Errorf("SBER_VAT должен быть 0..%d (taxType), а не %d", maxTaxType, *c.Sber.VAT)
+	}
+
 	if c.Env != "production" || !c.SberEnabled() {
 		return nil
 	}
@@ -78,7 +97,7 @@ func (c Config) validateSber() error {
 	if c.Sber.TaxSystem == "" {
 		missing = append(missing, "SBER_TAX_SYSTEM")
 	}
-	if c.Sber.VAT <= 0 {
+	if c.Sber.VAT == nil {
 		missing = append(missing, "SBER_VAT")
 	}
 	if c.Sber.INN == "" {

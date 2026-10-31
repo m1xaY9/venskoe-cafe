@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -105,6 +106,31 @@ func TestValidateSberProduction(t *testing.T) {
 		t.Setenv("SBER_INN", "")
 		if _, err := Load(); err == nil {
 			t.Fatal("ждали ошибку: нет SBER_INN")
+		}
+	})
+
+	t.Run("НДС 0 (без НДС) в production — ок", func(t *testing.T) {
+		base()
+		t.Setenv("SBER_VAT", "0")
+		if _, err := Load(); err != nil {
+			t.Fatalf("VAT=0 (без НДС) — валидное значение: %v", err)
+		}
+	})
+
+	t.Run("НДС не задан — ошибка", func(t *testing.T) {
+		base()
+		// t.Setenv не умеет убирать переменную — убираем вручную, cleanup вернёт исходное.
+		os.Unsetenv("SBER_VAT")
+		if _, err := Load(); err == nil {
+			t.Fatal("ждали ошибку: SBER_VAT не задан")
+		}
+	})
+
+	t.Run("НДС вне диапазона — ошибка", func(t *testing.T) {
+		base()
+		t.Setenv("SBER_VAT", "99")
+		if _, err := Load(); err == nil {
+			t.Fatal("ждали ошибку: SBER_VAT=99 вне 0..13")
 		}
 	})
 

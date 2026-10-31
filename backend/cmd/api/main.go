@@ -90,8 +90,9 @@ func run() error {
 				FFDVersion: cfg.Sber.FFDVersion,
 				TaxSystem:  cfg.Sber.TaxSystem,
 				INN:        cfg.Sber.INN,
-				VAT:        cfg.Sber.VAT,
+				VAT:        cfg.VATValue(),
 			},
+			FiscalReady: cfg.FiscalReady(),
 		}, log)
 		if err != nil {
 			return err
