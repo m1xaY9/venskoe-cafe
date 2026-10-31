@@ -11,9 +11,15 @@ import (
 	"venskoe/backend/internal/payments"
 )
 
+// callbackPerMinute — лимит callback-уведомлений Сбера с одного IP в минуту.
+const callbackPerMinute = 60
+
 func (d Deps) registerPayments(mux *http.ServeMux) {
+	cbLimiter := newRateLimiter(callbackPerMinute, time.Minute)
 	mux.HandleFunc("POST /api/orders/{token}/pay", d.payOrder)
-	mux.HandleFunc("POST /api/payments/sber/callback", d.sberCallback)
+	mux.HandleFunc("POST /api/payments/sber/callback", func(w http.ResponseWriter, r *http.Request) {
+		d.sberCallback(w, r, cbLimiter)
+	})
 	mux.HandleFunc("GET /api/payments/sber/return", d.sberReturn)
 }
 
@@ -35,6 +41,9 @@ func (d Deps) payOrder(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, payments.ErrNotPayable):
 		writeError(w, http.StatusConflict, "not_payable", "Этот заказ нельзя оплатить")
 		return
+	case errors.Is(err, payments.ErrInProgress):
+		writeError(w, http.StatusConflict, "payment_in_progress", "Оплата уже создаётся, подождите")
+		return
 	case err != nil:
 		d.Log.Error("api/pay: не смогли создать оплату", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal", "Не удалось создать оплату")
@@ -45,7 +54,14 @@ func (d Deps) payOrder(w http.ResponseWriter, r *http.Request) {
 
 // sberCallback принимает уведомление Сбера, сразу отвечает 200 и запускает перепроверку
 // статуса в фоне. Самому callback не верим — всё решает getOrderStatusExtended.
-func (d Deps) sberCallback(w http.ResponseWriter, r *http.Request) {
+func (d Deps) sberCallback(w http.ResponseWriter, r *http.Request, limiter *rateLimiter) {
+	if !limiter.allow(clientIP(r, d.TrustedProxies), time.Now()) {
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "Слишком много уведомлений")
+		return
+	}
+	// Тело callback маленькое — ограничиваем 16 КБ.
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+
 	mdOrder, orderNumber := parseCallbackIDs(r)
 
 	// Отвечаем быстро, чтобы Сбер не копил повторы; работу делаем после ответа.

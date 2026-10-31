@@ -73,6 +73,20 @@ func TestPayOrderNotPayable(t *testing.T) {
 	}
 }
 
+func TestPayOrderInProgress(t *testing.T) {
+	h := NewHandler(paymentsDeps(fakePayments{payErr: payments.ErrInProgress}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/orders/tok1/pay", nil))
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("код ответа %d, ждали 409", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "payment_in_progress") {
+		t.Errorf("ждали код payment_in_progress: %s", rec.Body.String())
+	}
+}
+
 func TestSberCallback(t *testing.T) {
 	h := NewHandler(paymentsDeps(fakePayments{findID: 7, found: true}))
 
@@ -85,6 +99,31 @@ func TestSberCallback(t *testing.T) {
 	// Callback всегда отвечает 200 быстро.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("код ответа %d, ждали 200", rec.Code)
+	}
+}
+
+func TestCallbackRateLimited(t *testing.T) {
+	h := NewHandler(paymentsDeps(fakePayments{}))
+
+	newCb := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/payments/sber/callback",
+			strings.NewReader("mdOrder=x&orderNumber=y"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = "203.0.113.10:5555"
+		return req
+	}
+
+	for i := range callbackPerMinute {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, newCb())
+		if rec.Code != http.StatusOK {
+			t.Fatalf("callback %d: код %d, ждали 200", i+1, rec.Code)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, newCb())
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("код %d, ждали 429 после лимита", rec.Code)
 	}
 }
 
