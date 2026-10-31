@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -83,7 +84,7 @@ func (c *Client) do(ctx context.Context, method string, reqBody, out any) error 
 		return fmt.Errorf("sber: сериализация запроса: %w", err)
 	}
 
-	c.log.Info("sber запрос", "method", method, "body", redact(reqBody))
+	c.log.Info("sber запрос", "method", method, "body", sanitizeForLog(body))
 
 	url := c.baseURL + "/" + method
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -104,7 +105,7 @@ func (c *Client) do(ctx context.Context, method string, reqBody, out any) error 
 		return fmt.Errorf("sber: чтение ответа %s: %w", method, err)
 	}
 
-	c.log.Info("sber ответ", "method", method, "status", resp.StatusCode, "body", string(respBody))
+	c.log.Info("sber ответ", "method", method, "status", resp.StatusCode, "body", sanitizeForLog(respBody))
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("sber: %s: код ответа %d", method, resp.StatusCode)
@@ -115,21 +116,50 @@ func (c *Client) do(ctx context.Context, method string, reqBody, out any) error 
 	return nil
 }
 
-// redact сериализует тело запроса для лога, убирая userName и password.
-func redact(v any) string {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "<не сериализуется>"
-	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
+// sanitizeForLog готовит JSON к записи в лог: убирает userName/password и маскирует
+// email и phone на любом уровне вложенности.
+func sanitizeForLog(raw []byte) string {
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
 		return "<не разбирается>"
 	}
-	delete(m, "userName")
-	delete(m, "password")
-	out, err := json.Marshal(m)
+	out, err := json.Marshal(sanitize(v))
 	if err != nil {
 		return "<не сериализуется>"
 	}
 	return string(out)
+}
+
+func sanitize(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			switch strings.ToLower(k) {
+			case "username", "password":
+				delete(t, k)
+			case "email", "phone":
+				if s, ok := val.(string); ok {
+					t[k] = maskContact(s)
+				}
+			default:
+				t[k] = sanitize(val)
+			}
+		}
+		return t
+	case []any:
+		for i := range t {
+			t[i] = sanitize(t[i])
+		}
+		return t
+	}
+	return v
+}
+
+// maskContact оставляет первые 2 и последние 2 символа, остальное заменяет на звёздочки.
+func maskContact(s string) string {
+	r := []rune(s)
+	if len(r) <= 4 {
+		return strings.Repeat("*", len(r))
+	}
+	return string(r[:2]) + strings.Repeat("*", len(r)-4) + string(r[len(r)-2:])
 }

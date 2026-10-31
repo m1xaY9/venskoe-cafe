@@ -96,6 +96,49 @@ func TestPasswordNotLogged(t *testing.T) {
 	}
 }
 
+func TestEmailPhoneMaskedInLog(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	c := testClient(t, log, func(w http.ResponseWriter, r *http.Request) {
+		// Ответ тоже содержит email — он должен быть замаскирован в логе.
+		_, _ = w.Write([]byte(`{"errorCode":"0","payerData":{"email":"payer@mail.ru"}}`))
+	})
+
+	_, err := c.GetOrderStatusExtended(context.Background(), StatusRequest{OrderID: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Отдельно проверим маскировку в запросе register (email/phone передаём мы).
+	_, _ = c.Register(context.Background(), RegisterRequest{
+		OrderNumber: "1001-1", Amount: 19900, ReturnURL: "https://r",
+		Email: "customer@testmail.ru", Phone: "+79991234567",
+	})
+
+	logged := buf.String()
+	for _, secret := range []string{"customer@testmail.ru", "+79991234567", "payer@mail.ru"} {
+		if strings.Contains(logged, secret) {
+			t.Errorf("в лог попал незамаскированный контакт %q", secret)
+		}
+	}
+	if !strings.Contains(logged, "cu") || !strings.Contains(logged, "ru") {
+		t.Errorf("ждали замаскированный email (первые/последние символы): %s", logged)
+	}
+}
+
+func TestMaskContact(t *testing.T) {
+	cases := map[string]string{
+		"customer@testmail.ru": "cu****************ru",
+		"+79991234567":         "+7********67",
+		"ab":                   "**",
+		"abcd":                 "****",
+	}
+	for in, want := range cases {
+		if got := maskContact(in); got != want {
+			t.Errorf("maskContact(%q) = %q, ждали %q", in, got, want)
+		}
+	}
+}
+
 func TestBuildOrderBundle(t *testing.T) {
 	c := &Client{fiscal: FiscalConfig{FFDVersion: "1.05", TaxSystem: "osn", INN: "123", VAT: 6}}
 	bundle := c.BuildOrderBundle([]BundleItem{{Name: "Сырники", PriceKop: 39000, Qty: 2}}, 20000)
