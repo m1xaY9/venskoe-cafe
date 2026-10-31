@@ -12,6 +12,7 @@ import (
 	"venskoe/backend/internal/delivery"
 	"venskoe/backend/internal/menu"
 	"venskoe/backend/internal/orders"
+	"venskoe/backend/internal/payments"
 )
 
 type Pinger interface {
@@ -40,6 +41,14 @@ type OrderService interface {
 	ByToken(ctx context.Context, token string) (orders.GuestOrder, error)
 }
 
+// PaymentService — онлайн-оплата через Сбер. За ним скрыт payments.Service, в тестах — заглушка.
+type PaymentService interface {
+	Pay(ctx context.Context, token string) (payments.PayResult, error)
+	SyncPayment(ctx context.Context, paymentID int64) error
+	FindPaymentByCallback(ctx context.Context, mdOrder, orderNumber string) (int64, bool, error)
+	SyncByOrderToken(ctx context.Context, token string) error
+}
+
 // Deps — зависимости обработчиков. Передаём их одной структурой, чтобы в тестах
 // подставлять заглушки вместо настоящих базы и домена.
 type Deps struct {
@@ -50,8 +59,11 @@ type Deps struct {
 	Delivery DeliveryService
 	Address  AddressSuggester
 	Orders   OrderService
+	Payments PaymentService
 	// TrustedProxies — доверенные прокси для чтения X-Forwarded-For при определении IP.
 	TrustedProxies []*net.IPNet
+	// PublicBaseURL — адрес фронтенда для редиректа гостя на страницу заказа.
+	PublicBaseURL string
 }
 
 func NewHandler(d Deps) http.Handler {
@@ -87,6 +99,7 @@ func NewHandler(d Deps) http.Handler {
 	d.registerDelivery(mux)
 	d.registerAddress(mux)
 	d.registerOrders(mux)
+	d.registerPayments(mux)
 
 	return recoverPanic(d.Log, logRequests(d.Log, mux))
 }
