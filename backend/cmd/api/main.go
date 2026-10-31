@@ -100,7 +100,7 @@ func run() error {
 	} else {
 		log.Warn("Сбер не настроен (нет SBER_USERNAME): онлайн-оплата отключена")
 	}
-	paymentsSvc := payments.NewService(pool, sberClient, cfg.Sber.ReturnURL, cfg.Sber.FailURL, cfg.PublicBaseURL, sberEnabled)
+	paymentsSvc := payments.NewService(pool, sberClient, log, cfg.Sber.ReturnURL, cfg.Sber.FailURL, cfg.PublicBaseURL, sberEnabled)
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,

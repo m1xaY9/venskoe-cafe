@@ -203,13 +203,22 @@ func (s *Service) ReconcilePending(ctx context.Context) error {
 	return nil
 }
 
-// AutoCancel отменяет онлайн-заказы, не оплаченные за 20 минут. Перед отменой делает
-// финальную проверку в Сбере. now передаётся параметром — удобно тестировать.
+// autoCancelBuffer — запас после истечения сессии оплаты, чтобы не отменить заказ, пока
+// callback/сверка ещё в пути.
+const autoCancelBuffer = 5 * time.Minute
+
+// AutoCancel отменяет онлайн-заказы, не оплаченные вовремя. Срок считается от created_at
+// последней попытки оплаты (без попыток — от created_at заказа) + 20 минут + запас. Перед
+// отменой обязательно проверяет оплату в Сбере. now передаётся параметром для тестов.
 func (s *Service) AutoCancel(ctx context.Context, now time.Time) error {
-	cutoff := now.Add(-sessionTimeout)
+	cutoff := now.Add(-(sessionTimeout + autoCancelBuffer))
 	rows, err := s.pool.Query(ctx, `
-		SELECT id FROM orders
-		WHERE payment_method = $1 AND status IN ($2, $3) AND created_at < $4`,
+		SELECT o.id FROM orders o
+		LEFT JOIN LATERAL (
+			SELECT created_at FROM payments p WHERE p.order_id = o.id ORDER BY attempt DESC LIMIT 1
+		) lp ON true
+		WHERE o.payment_method = $1 AND o.status IN ($2, $3)
+		  AND COALESCE(lp.created_at, o.created_at) < $4`,
 		orders.PaymentOnline, orders.StatusCreated, orders.StatusAwaitingPayment, cutoff)
 	if err != nil {
 		return err
@@ -220,19 +229,37 @@ func (s *Service) AutoCancel(ctx context.Context, now time.Time) error {
 	}
 
 	for _, orderID := range ids {
-		// Финальная проверка в Сбере: вдруг оплата всё же прошла.
-		if pid, ok, err := s.latestPaymentID(ctx, orderID); err != nil {
+		pid, hasPayment, err := s.latestPaymentID(ctx, orderID)
+		if err != nil {
 			return err
-		} else if ok {
+		}
+		var checked *int64
+		if hasPayment {
+			// Обязательная проверка в Сбере. Если не удалось проверить — не отменяем.
 			if err := s.SyncPayment(ctx, pid); err != nil {
+				s.log.Error("автоотмена: не смогли проверить оплату в Сбере", "order_id", orderID, "err", err)
+				continue
+			}
+			st, err := s.paymentStatus(ctx, pid)
+			if err != nil {
 				return err
 			}
+			if st == StatusPaid {
+				continue // оплата всё же прошла — не отменяем
+			}
+			checked = &pid
 		}
-		if err := s.cancelIfUnpaid(ctx, orderID); err != nil {
+		if err := s.cancelIfUnpaid(ctx, orderID, checked); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *Service) paymentStatus(ctx context.Context, paymentID int64) (string, error) {
+	var st string
+	err := s.pool.QueryRow(ctx, `SELECT status FROM payments WHERE id = $1`, paymentID).Scan(&st)
+	return st, err
 }
 
 func (s *Service) latestPaymentID(ctx context.Context, orderID int64) (int64, bool, error) {
@@ -247,7 +274,9 @@ func (s *Service) latestPaymentID(ctx context.Context, orderID int64) (int64, bo
 	return id, true, nil
 }
 
-func (s *Service) cancelIfUnpaid(ctx context.Context, orderID int64) error {
+// cancelIfUnpaid отменяет заказ, если он ещё ждёт оплату. checkedPayment — платёж, по
+// которому Сбер подтвердил, что он не оплачен: только его помечаем expired.
+func (s *Service) cancelIfUnpaid(ctx context.Context, orderID int64, checkedPayment *int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -264,11 +293,13 @@ func (s *Service) cancelIfUnpaid(ctx context.Context, orderID int64) error {
 	if err := orders.Transition(ctx, tx, orderID, orders.StatusCancelled, orders.ActorSystem, "не оплачен за 20 минут"); err != nil {
 		return err
 	}
-	// Незавершённые попытки помечаем просроченными.
-	if _, err := tx.Exec(ctx,
-		`UPDATE payments SET status = $1, updated_at = now() WHERE order_id = $2 AND status IN ($3, $4)`,
-		StatusExpired, orderID, StatusCreated, StatusRegistered); err != nil {
-		return err
+	// Помечаем expired только проверенный платёж и только если он ещё ждал оплату.
+	if checkedPayment != nil {
+		if _, err := tx.Exec(ctx,
+			`UPDATE payments SET status = $1, updated_at = now() WHERE id = $2 AND status = $3`,
+			StatusExpired, *checkedPayment, StatusRegistered); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }

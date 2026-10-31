@@ -3,6 +3,8 @@ package payments
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"sync"
@@ -110,14 +112,15 @@ func createOrder(t *testing.T, pool *pgxpool.Pool, status string, createdAgo tim
 	return id, number, token
 }
 
-// createPayment заводит платёж в статусе registered для заказа.
-func createPayment(t *testing.T, pool *pgxpool.Pool, orderID, number int64) int64 {
+// createPayment заводит платёж в статусе registered для заказа. createdAgo — насколько
+// давно создана попытка (для проверки сроков автоотмены).
+func createPayment(t *testing.T, pool *pgxpool.Pool, orderID, number int64, createdAgo time.Duration) int64 {
 	t.Helper()
 	var id int64
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO payments (order_id, attempt, sber_order_number, sber_order_id, amount_kop, status)
-		VALUES ($1, 1, $2, 'sber-abc', 39000, 'registered') RETURNING id`,
-		orderID, fmt.Sprintf("%d-1", number)).Scan(&id)
+		INSERT INTO payments (order_id, attempt, sber_order_number, sber_order_id, amount_kop, status, created_at)
+		VALUES ($1, 1, $2, 'sber-abc', 39000, 'registered', now() - make_interval(secs => $3)) RETURNING id`,
+		orderID, fmt.Sprintf("%d-1", number), createdAgo.Seconds()).Scan(&id)
 	if err != nil {
 		t.Fatalf("создание платежа: %v", err)
 	}
@@ -125,7 +128,8 @@ func createPayment(t *testing.T, pool *pgxpool.Pool, orderID, number int64) int6
 }
 
 func newSvc(pool *pgxpool.Pool, fake *fakeSber) *Service {
-	return NewService(pool, fake, "http://api/return", "http://api/return", "http://front", true)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return NewService(pool, fake, log, "http://api/return", "http://api/return", "http://front", true)
 }
 
 func orderStatus(t *testing.T, pool *pgxpool.Pool, id int64) string {
@@ -162,9 +166,9 @@ func TestSyncPaymentStatuses(t *testing.T) {
 		t.Run(tc.wantPayment, func(t *testing.T) {
 			pool := setup(t)
 			orderID, number, _ := createOrder(t, pool, orders.StatusAwaitingPayment, 0)
-			paymentID := createPayment(t, pool, orderID, number)
+			paymentID := createPayment(t, pool, orderID, number, 0)
 
-			fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(tc.sberStatus)}}
+			fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(tc.sberStatus), Amount: 39000}}
 			svc := newSvc(pool, fake)
 
 			if err := svc.SyncPayment(context.Background(), paymentID); err != nil {
@@ -180,12 +184,78 @@ func TestSyncPaymentStatuses(t *testing.T) {
 	}
 }
 
+func TestSyncPaymentAmountMismatch(t *testing.T) {
+	pool := setup(t)
+	orderID, number, _ := createOrder(t, pool, orders.StatusAwaitingPayment, 0)
+	paymentID := createPayment(t, pool, orderID, number, 0)
+
+	// Сбер говорит «оплачено», но на другую сумму — в paid не переводим.
+	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2), Amount: 10000}}
+	svc := newSvc(pool, fake)
+
+	if err := svc.SyncPayment(context.Background(), paymentID); err != nil {
+		t.Fatalf("SyncPayment: %v", err)
+	}
+	if got := orderStatus(t, pool, orderID); got != orders.StatusAwaitingPayment {
+		t.Errorf("заказ %q, ждали awaiting_payment (сумма не сошлась)", got)
+	}
+	if got := paymentStatus(t, pool, paymentID); got == StatusPaid {
+		t.Errorf("платёж не должен стать paid при несовпадении суммы")
+	}
+}
+
+func TestSyncPaymentFromCreated(t *testing.T) {
+	pool := setup(t)
+	// register прошёл, markRegistered упал: заказ остался в created, платёж registered.
+	orderID, number, _ := createOrder(t, pool, orders.StatusCreated, 0)
+	paymentID := createPayment(t, pool, orderID, number, 0)
+
+	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2), Amount: 39000}}
+	svc := newSvc(pool, fake)
+
+	if err := svc.SyncPayment(context.Background(), paymentID); err != nil {
+		t.Fatalf("SyncPayment: %v", err)
+	}
+	if got := orderStatus(t, pool, orderID); got != orders.StatusPaid {
+		t.Fatalf("заказ %q, ждали paid (created → awaiting_payment → paid)", got)
+	}
+	var events int
+	_ = pool.QueryRow(context.Background(), `SELECT count(*) FROM order_events WHERE order_id = $1 AND to_status IN ('awaiting_payment','paid')`, orderID).Scan(&events)
+	if events != 2 {
+		t.Errorf("переходов awaiting_payment+paid %d, ждали 2", events)
+	}
+}
+
+func TestSyncPaymentAfterCancelNeedsRefund(t *testing.T) {
+	pool := setup(t)
+	orderID, number, _ := createOrder(t, pool, orders.StatusCancelled, 0)
+	paymentID := createPayment(t, pool, orderID, number, 0)
+
+	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2), Amount: 39000}}
+	svc := newSvc(pool, fake)
+
+	if err := svc.SyncPayment(context.Background(), paymentID); err != nil {
+		t.Fatalf("SyncPayment: %v", err)
+	}
+	if got := orderStatus(t, pool, orderID); got != orders.StatusCancelled {
+		t.Errorf("заказ %q, ждали cancelled (не меняем)", got)
+	}
+	if got := paymentStatus(t, pool, paymentID); got != StatusPaid {
+		t.Errorf("платёж %q, ждали paid", got)
+	}
+	var needsRefund bool
+	_ = pool.QueryRow(context.Background(), `SELECT needs_refund FROM payments WHERE id = $1`, paymentID).Scan(&needsRefund)
+	if !needsRefund {
+		t.Errorf("ждали needs_refund=true")
+	}
+}
+
 func TestSyncPaymentRepeatCallback(t *testing.T) {
 	pool := setup(t)
 	orderID, number, _ := createOrder(t, pool, orders.StatusAwaitingPayment, 0)
-	paymentID := createPayment(t, pool, orderID, number)
+	paymentID := createPayment(t, pool, orderID, number, 0)
 
-	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2)}}
+	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2), Amount: 39000}}
 	svc := newSvc(pool, fake)
 
 	// Повтор callback: два вызова SyncPayment не должны сломать заказ.
@@ -208,9 +278,9 @@ func TestSyncPaymentRepeatCallback(t *testing.T) {
 func TestSyncPaymentCallbackReturnRace(t *testing.T) {
 	pool := setup(t)
 	orderID, number, _ := createOrder(t, pool, orders.StatusAwaitingPayment, 0)
-	paymentID := createPayment(t, pool, orderID, number)
+	paymentID := createPayment(t, pool, orderID, number, 0)
 
-	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2)}}
+	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2), Amount: 39000}}
 	svc := newSvc(pool, fake)
 
 	// Callback и возврат гостя пришли одновременно.
@@ -240,7 +310,7 @@ func TestAutoCancel(t *testing.T) {
 
 	// Неоплаченный заказ старше 20 минут, в Сбере не оплачен (status 0) → отмена.
 	staleID, staleNum, _ := createOrder(t, pool, orders.StatusAwaitingPayment, 25*time.Minute)
-	createPayment(t, pool, staleID, staleNum)
+	createPayment(t, pool, staleID, staleNum, 30*time.Minute)
 
 	// Свежий заказ (5 минут) не трогаем.
 	freshID, _, _ := createOrder(t, pool, orders.StatusAwaitingPayment, 5*time.Minute)
@@ -266,9 +336,9 @@ func TestAutoCancelSkipsPaid(t *testing.T) {
 
 	// Старый заказ, но финальная проверка показывает оплату (status 2) → не отменяем.
 	id, num, _ := createOrder(t, pool, orders.StatusAwaitingPayment, 25*time.Minute)
-	createPayment(t, pool, id, num)
+	createPayment(t, pool, id, num, 30*time.Minute)
 
-	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2)}}
+	fake := &fakeSber{statusResp: sber.StatusResponse{ErrorCode: "0", OrderStatus: intp(2), Amount: 39000}}
 	svc := newSvc(pool, fake)
 
 	if err := svc.AutoCancel(context.Background(), now); err != nil {
@@ -313,7 +383,7 @@ func TestPayReusesLivePayment(t *testing.T) {
 func TestPayDisabled(t *testing.T) {
 	pool := setup(t)
 	_, _, token := createOrder(t, pool, orders.StatusCreated, 0)
-	svc := NewService(pool, nil, "r", "f", "front", false)
+	svc := NewService(pool, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), "r", "f", "front", false)
 
 	if _, err := svc.Pay(context.Background(), token); err != ErrDisabled {
 		t.Fatalf("ждали ErrDisabled, получили %v", err)
