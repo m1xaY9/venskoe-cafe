@@ -73,6 +73,8 @@ curl http://localhost:8080/api/orders/<token>   # статус станет paid
 
 Без `SBER_USERNAME` онлайн-оплата отключена: `POST /.../pay` отвечает `503`, остальной сайт работает.
 
+В `APP_ENV=production` при включённом Сбере приложение не стартует, если `SBER_BASE_URL` не на `https://epay.sberbank.ru` или не заданы реквизиты чека (`SBER_FFD_VERSION`, `SBER_TAX_SYSTEM`, `SBER_VAT`, `SBER_INN`). Локально без реквизитов чека `orderBundle` не передаётся (в лог пишется Warn).
+
 Примеры:
 ```bash
 curl http://localhost:8080/api/menu
