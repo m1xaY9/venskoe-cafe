@@ -34,12 +34,13 @@ type FiscalConfig struct {
 
 // Client — клиент платёжного шлюза Сбера.
 type Client struct {
-	baseURL  string
-	username string
-	password string
-	http     *http.Client
-	log      *slog.Logger
-	fiscal   FiscalConfig
+	baseURL     string
+	username    string
+	password    string
+	http        *http.Client
+	log         *slog.Logger
+	fiscal      FiscalConfig
+	fiscalReady bool
 }
 
 // New создаёт клиент. HTTP-таймаут 15 с, TLS доверяет системным сертификатам плюс
@@ -66,13 +67,17 @@ func New(cfg Config, log *slog.Logger) (*Client, error) {
 		},
 	}
 
+	fiscalReady := cfg.Fiscal.FFDVersion != "" && cfg.Fiscal.TaxSystem != "" &&
+		cfg.Fiscal.INN != "" && cfg.Fiscal.VAT > 0
+
 	return &Client{
-		baseURL:  cfg.BaseURL,
-		username: cfg.Username,
-		password: cfg.Password,
-		http:     httpClient,
-		log:      log,
-		fiscal:   cfg.Fiscal,
+		baseURL:     cfg.BaseURL,
+		username:    cfg.Username,
+		password:    cfg.Password,
+		http:        httpClient,
+		log:         log,
+		fiscal:      cfg.Fiscal,
+		fiscalReady: fiscalReady,
 	}, nil
 }
 

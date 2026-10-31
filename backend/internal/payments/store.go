@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"venskoe/backend/internal/orders"
@@ -98,16 +99,20 @@ func (s *Service) preparePayment(ctx context.Context, token string) (prep, error
 		return prep{}, fmt.Errorf("payments: вставка платежа: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, `SELECT title, price_kop, qty FROM order_items WHERE order_id = $1 ORDER BY id`, p.orderID)
+	rows, err := tx.Query(ctx, `SELECT dish_id, title, price_kop, qty FROM order_items WHERE order_id = $1 ORDER BY id`, p.orderID)
 	if err != nil {
 		return prep{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var it sber.BundleItem
-		if err := rows.Scan(&it.Name, &it.PriceKop, &it.Qty); err != nil {
+		var (
+			dishID int64
+			it     sber.BundleItem
+		)
+		if err := rows.Scan(&dishID, &it.Name, &it.PriceKop, &it.Qty); err != nil {
 			return prep{}, err
 		}
+		it.ItemCode = strconv.FormatInt(dishID, 10)
 		p.items = append(p.items, it)
 	}
 	if err := rows.Err(); err != nil {

@@ -140,21 +140,61 @@ func TestMaskContact(t *testing.T) {
 }
 
 func TestBuildOrderBundle(t *testing.T) {
-	c := &Client{fiscal: FiscalConfig{FFDVersion: "1.05", TaxSystem: "osn", INN: "123", VAT: 6}}
-	bundle := c.BuildOrderBundle([]BundleItem{{Name: "Сырники", PriceKop: 39000, Qty: 2}}, 20000)
+	cases := []struct {
+		ffd             string
+		wantDishObject  string
+		wantDelivObject string
+		wantMeasure     string
+		wantMeasurement string // measurementUnit блюда
+	}{
+		{"1.05", "commodity", "service", "", "шт."},
+		{"1.2", "1", "4", "0", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.ffd, func(t *testing.T) {
+			c := &Client{
+				log:         discardLogger(),
+				fiscal:      FiscalConfig{FFDVersion: tc.ffd, TaxSystem: "osn", INN: "123", VAT: 6},
+				fiscalReady: true,
+			}
+			const amount = 78000 + 20000
+			bundle := c.BuildOrderBundle([]BundleItem{{ItemCode: "7", Name: "Сырники", PriceKop: 39000, Qty: 2}}, 20000)
 
-	if bundle.FFDVersion != "1.05" || bundle.ReceiptType != "sell" {
-		t.Fatalf("реквизиты чека: %+v", bundle)
+			if bundle.FFDVersion != tc.ffd || bundle.ReceiptType != "sell" {
+				t.Fatalf("реквизиты чека: %+v", bundle)
+			}
+			if len(bundle.CartItems.Items) != 2 {
+				t.Fatalf("позиций %d, ждали 2", len(bundle.CartItems.Items))
+			}
+
+			dish := bundle.CartItems.Items[0]
+			if dish.ItemCode != "7" || dish.ItemAmount != 78000 || dish.PaymentObject != tc.wantDishObject {
+				t.Errorf("позиция блюда: %+v", dish)
+			}
+			if dish.Quantity.Measure != tc.wantMeasure || dish.MeasurementUnit != tc.wantMeasurement {
+				t.Errorf("единицы блюда: measure=%q unit=%q", dish.Quantity.Measure, dish.MeasurementUnit)
+			}
+
+			deliv := bundle.CartItems.Items[1]
+			if deliv.ItemCode != "delivery" || deliv.ItemAmount != 20000 || deliv.PaymentObject != tc.wantDelivObject {
+				t.Errorf("позиция доставки: %+v", deliv)
+			}
+
+			// Сумма позиций должна равняться сумме заказа.
+			var sum int64
+			for _, it := range bundle.CartItems.Items {
+				sum += it.ItemAmount
+			}
+			if sum != amount {
+				t.Errorf("сумма позиций %d, ждали %d", sum, amount)
+			}
+		})
 	}
-	if len(bundle.CartItems.Items) != 2 { // блюдо + доставка
-		t.Fatalf("позиций %d, ждали 2", len(bundle.CartItems.Items))
-	}
-	dish := bundle.CartItems.Items[0]
-	if dish.ItemAmount != 78000 || dish.Tax.TaxType != 6 || dish.PaymentObject != "commodity" {
-		t.Errorf("позиция блюда: %+v", dish)
-	}
-	delivery := bundle.CartItems.Items[1]
-	if delivery.Name != "Доставка" || delivery.ItemAmount != 20000 || delivery.PaymentObject != "service" {
-		t.Errorf("позиция доставки: %+v", delivery)
+}
+
+func TestBuildOrderBundleNotConfigured(t *testing.T) {
+	c := &Client{log: discardLogger(), fiscalReady: false}
+	if bundle := c.BuildOrderBundle([]BundleItem{{Name: "x", PriceKop: 100, Qty: 1}}, 0); bundle != nil {
+		t.Errorf("без реквизитов чека orderBundle должен быть nil, получили %+v", bundle)
 	}
 }

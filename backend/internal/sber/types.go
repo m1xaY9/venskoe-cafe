@@ -91,6 +91,7 @@ type CartItems struct {
 
 type CartItem struct {
 	PositionID      string   `json:"positionId"`
+	ItemCode        string   `json:"itemCode"`
 	Name            string   `json:"name"`
 	Quantity        Quantity `json:"quantity"`
 	ItemPrice       int64    `json:"itemPrice"`
@@ -102,7 +103,8 @@ type CartItem struct {
 }
 
 type Quantity struct {
-	Value float64 `json:"value"`
+	Value   float64 `json:"value"`
+	Measure string  `json:"measure,omitempty"`
 }
 
 type Tax struct {
@@ -111,6 +113,7 @@ type Tax struct {
 
 // BundleItem — позиция заказа для построения orderBundle (без деталей БД).
 type BundleItem struct {
+	ItemCode string // код товара: id блюда
 	Name     string
 	PriceKop int64
 	Qty      int

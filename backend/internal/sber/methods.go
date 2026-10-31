@@ -76,47 +76,61 @@ func apiError(code, message string) error {
 }
 
 // BuildOrderBundle собирает корзину для чека 54-ФЗ: позиции заказа и доставку отдельной
-// позицией. Реквизиты (ФФД, СНО, ИНН, ставка НДС) берутся из настроек.
+// позицией. Реквизиты (ФФД, СНО, ИНН, ставка НДС) берутся из настроек. Если реквизиты не
+// заданы (локальная разработка) — возвращает nil и пишет Warn: чек не формируем.
 func (c *Client) BuildOrderBundle(items []BundleItem, deliveryKop int64) *OrderBundle {
+	if !c.fiscalReady {
+		c.log.Warn("orderBundle не передаётся: не заданы реквизиты чека 54-ФЗ (SBER_FFD_VERSION/TAX_SYSTEM/VAT/INN)")
+		return nil
+	}
+
+	v12 := c.fiscal.FFDVersion == "1.2"
 	cartItems := make([]CartItem, 0, len(items)+1)
 	pos := 1
 	for _, it := range items {
-		cartItems = append(cartItems, CartItem{
-			PositionID:      strconv.Itoa(pos),
-			Name:            it.Name,
-			Quantity:        Quantity{Value: float64(it.Qty)},
-			ItemPrice:       it.PriceKop,
-			ItemAmount:      it.PriceKop * int64(it.Qty),
-			MeasurementUnit: "шт.",
-			PaymentMethod:   "full_payment",
-			PaymentObject:   "commodity",
-			Tax:             Tax{TaxType: c.fiscal.VAT},
-		})
+		cartItems = append(cartItems, c.cartItem(pos, it.ItemCode, it.Name, it.PriceKop, it.Qty, v12, false))
 		pos++
 	}
 	if deliveryKop > 0 {
-		cartItems = append(cartItems, CartItem{
-			PositionID:      strconv.Itoa(pos),
-			Name:            "Доставка",
-			Quantity:        Quantity{Value: 1},
-			ItemPrice:       deliveryKop,
-			ItemAmount:      deliveryKop,
-			MeasurementUnit: "усл.",
-			PaymentMethod:   "full_payment",
-			PaymentObject:   "service",
-			Tax:             Tax{TaxType: c.fiscal.VAT},
-		})
-	}
-
-	var company *Company
-	if c.fiscal.TaxSystem != "" || c.fiscal.INN != "" {
-		company = &Company{SNO: c.fiscal.TaxSystem, INN: c.fiscal.INN}
+		cartItems = append(cartItems, c.cartItem(pos, "delivery", "Доставка", deliveryKop, 1, v12, true))
 	}
 
 	return &OrderBundle{
 		FFDVersion:  c.fiscal.FFDVersion,
 		ReceiptType: "sell",
-		Company:     company,
+		Company:     &Company{SNO: c.fiscal.TaxSystem, INN: c.fiscal.INN},
 		CartItems:   CartItems{Items: cartItems},
 	}
+}
+
+// cartItem собирает одну позицию чека с учётом версии ФФД. Для 1.2 — quantity.measure "0",
+// без measurementUnit, paymentObject "1"/"4"; для 1.05 — measurementUnit и "commodity"/"service".
+func (c *Client) cartItem(pos int, itemCode, name string, priceKop int64, qty int, v12, delivery bool) CartItem {
+	item := CartItem{
+		PositionID:    strconv.Itoa(pos),
+		ItemCode:      itemCode,
+		Name:          name,
+		Quantity:      Quantity{Value: float64(qty)},
+		ItemPrice:     priceKop,
+		ItemAmount:    priceKop * int64(qty),
+		PaymentMethod: "full_payment",
+		Tax:           Tax{TaxType: c.fiscal.VAT},
+	}
+	if v12 {
+		item.Quantity.Measure = "0"
+		if delivery {
+			item.PaymentObject = "4"
+		} else {
+			item.PaymentObject = "1"
+		}
+	} else {
+		if delivery {
+			item.MeasurementUnit = "усл."
+			item.PaymentObject = "service"
+		} else {
+			item.MeasurementUnit = "шт."
+			item.PaymentObject = "commodity"
+		}
+	}
+	return item
 }
