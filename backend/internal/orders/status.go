@@ -10,7 +10,7 @@ import (
 
 // Статусы заказа. Жизнь заказа описана в docs/architecture.md.
 const (
-	StatusCreated         = "created"          // создан; для онлайн-оплаты ждёт оплаты в след. ветке
+	StatusCreated         = "created"          // создан; онлайн-оплата ещё не начата
 	StatusAwaitingPayment = "awaiting_payment" // ждём оплату в Сбере
 	StatusPaid            = "paid"             // оплачен онлайн
 	StatusAccepted        = "accepted"         // кафе приняло заказ

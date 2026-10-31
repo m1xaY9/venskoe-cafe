@@ -1,8 +1,7 @@
-# Короткие команды для частых действий. Запуск: make <цель>, например make test.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOOSE_VERSION := v3.26.0
 
-# Подгружает переменные из .env, если файл есть. Используется в run и test.
+# Подгружает переменные из .env, если файл есть.
 LOAD_ENV := if [ -f .env ]; then set -a; . ./.env; set +a; fi;
 
 .PHONY: run test lint build fmt db-up db-down db-reset db-seed migrate-new
@@ -10,9 +9,8 @@ LOAD_ENV := if [ -f .env ]; then set -a; . ./.env; set +a; fi;
 run: ## запустить API локально (сначала make db-up)
 	@$(LOAD_ENV) go run ./cmd/api
 
-# -p 1: пакеты тестируются по очереди, а не параллельно. Несколько пакетов
-# работают с одной тестовой базой, и параллельно они мешали бы друг другу.
-test: ## все тесты; -race ищет гонки данных между горутинами
+# -p 1: пакеты идут по очереди — они делят одну тестовую базу.
+test: ## все тесты (-race, последовательно)
 	@$(LOAD_ENV) go test -race -count=1 -p 1 ./...
 
 lint: ## статические проверки: форматирование и go vet

@@ -1,20 +1,18 @@
 -- +goose Up
--- Короткий человекочитаемый номер заказа для кухни. Последовательность, стартуем с 1001,
--- чтобы номера сразу выглядели «настоящими». Пропуски в номерах допустимы.
+-- Человекочитаемый номер заказа для кухни; пропуски в номерах допустимы.
 CREATE SEQUENCE order_number_seq START 1001;
 
 CREATE TABLE orders (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    -- Случайный токен (128 бит, base64url): по нему гость открывает свой заказ.
+    -- Случайный токен (128 бит): по нему гость открывает заказ, перебор невозможен.
     public_token    text   NOT NULL UNIQUE,
     number          bigint NOT NULL DEFAULT nextval('order_number_seq') UNIQUE,
     status          text   NOT NULL,
     fulfillment     text   NOT NULL,
     payment_method  text   NOT NULL,
     customer_name   text   NOT NULL,
-    -- Телефон нормализован к виду +7XXXXXXXXXX.
     phone           text   NOT NULL,
-    -- Email обязателен для онлайн-оплаты (его требует Сбер), иначе может быть пустым.
+    -- Обязателен для онлайн-оплаты: его требует Сбер.
     email           text   NOT NULL DEFAULT '',
     address         text   NOT NULL DEFAULT '',
     entrance        text   NOT NULL DEFAULT '',
@@ -25,7 +23,6 @@ CREATE TABLE orders (
     lon             double precision,
     delivery_zone_id bigint REFERENCES delivery_zones (id),
     comment         text   NOT NULL DEFAULT '',
-    -- Когда нужен заказ: asap (как можно скорее) или на конкретное время в when_at.
     when_asap       boolean NOT NULL DEFAULT true,
     when_at         timestamptz,
     subtotal_kop    bigint NOT NULL CHECK (subtotal_kop >= 0),

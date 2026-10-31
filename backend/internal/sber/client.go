@@ -26,7 +26,7 @@ type Config struct {
 	FiscalReady bool
 }
 
-// FiscalConfig — реквизиты чека 54-ФЗ из настроек (уточняются у владельца).
+// FiscalConfig — реквизиты чека 54-ФЗ из настроек.
 type FiscalConfig struct {
 	FFDVersion string
 	TaxSystem  string // sno
