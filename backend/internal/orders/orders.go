@@ -215,8 +215,8 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Created, error) {
 		return Created{}, err
 	}
 
-	// Оплата при получении — сразу принимаем заказ. Онлайн-оплата остаётся в created,
-	// её подхватит следующая ветка.
+	// Оплата при получении — сразу принимаем заказ. Онлайн-оплата остаётся в created
+	// до запроса /pay.
 	status := StatusCreated
 	if in.PaymentMethod == PaymentOnDelivery {
 		if err := Transition(ctx, tx, id, StatusAccepted, ActorSystem, "оплата при получении"); err != nil {

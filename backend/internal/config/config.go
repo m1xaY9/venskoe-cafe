@@ -39,8 +39,8 @@ type SberConfig struct {
 	BaseURL  string `env:"SBER_BASE_URL" envDefault:"https://ecomtest.sberbank.ru/ecomm/gw/partner/api/v1"`
 	Username string `env:"SBER_USERNAME"`
 	Password string `env:"SBER_PASSWORD"`
-	// Путь к корневому сертификату НУЦ Минцифры (Russian Trusted Root CA). Файл в репозиторий
-	// не кладём, владелец скачивает с gosuslugi.ru/crt.
+	// Путь к корневому сертификату НУЦ Минцифры (Russian Trusted Root CA). В репозиторий
+	// не кладётся, скачивается с gosuslugi.ru/crt.
 	CAFile    string `env:"SBER_CA_FILE"`
 	ReturnURL string `env:"SBER_RETURN_URL"`
 	FailURL   string `env:"SBER_FAIL_URL"`

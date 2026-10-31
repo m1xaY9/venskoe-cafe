@@ -32,11 +32,9 @@ INSERT INTO dishes (category_id, title, description, portion, price_kop, sort) V
 
 UPDATE dishes SET is_available = false WHERE title = 'Гуляш по-венски';
 
--- Доставка: строки cafe_settings и work_hours создаёт миграция 00003. Здесь задаём им
--- значения для разработки через INSERT ... ON CONFLICT DO UPDATE — так seed восстановит
--- все 7 дней, даже если интеграционный тест delivery оставил в work_hours лишь пару строк.
--- Зоны — чисто тестовые данные, их наполняем сами. Все значения ниже — ЗАГЛУШКИ,
--- реальные нужно взять у владельца (см. раздел «Нужно от владельца» в PR).
+-- cafe_settings и work_hours создаёт миграция 00003; здесь задаём значения для разработки
+-- через ON CONFLICT DO UPDATE, чтобы seed восстановил все 7 дней даже после интеграционных
+-- тестов delivery. Значения ниже — тестовые.
 INSERT INTO cafe_settings (id, delivery_enabled, pickup_enabled, pickup_address, pickup_min_order_kop, last_order_before_close_min)
 VALUES (1, true, true, 'Чита, ул. Ленина, 1 (ЗАГЛУШКА)', 50000, 30)
 ON CONFLICT (id) DO UPDATE SET
@@ -60,8 +58,8 @@ ON CONFLICT (weekday) DO UPDATE SET
     open_at = EXCLUDED.open_at,
     close_at = EXCLUDED.close_at;
 
--- Две зоны-заглушки вокруг центра Читы (примерно 52.034, 113.499). Координаты [lon, lat].
--- «Центр» (sort 10) лежит внутри «Город» (sort 20) — на пересечении берётся зона с меньшим sort.
+-- Две тестовые зоны вокруг центра Читы. Координаты [lon, lat]. «Центр» (sort 10) лежит
+-- внутри «Города» (sort 20) — на пересечении берётся зона с меньшим sort.
 -- CASCADE заодно чистит заказы, ссылающиеся на зоны (orders.delivery_zone_id).
 TRUNCATE delivery_zones RESTART IDENTITY CASCADE;
 INSERT INTO delivery_zones (name, polygon, delivery_price_kop, min_order_kop, free_from_kop, sort) VALUES
