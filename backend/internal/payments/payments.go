@@ -32,7 +32,12 @@ var (
 	ErrDisabled   = errors.New("payments: онлайн-оплата не настроена")
 	ErrNotOnline  = errors.New("payments: заказ не с онлайн-оплатой")
 	ErrNotPayable = errors.New("payments: заказ нельзя оплатить в текущем статусе")
+	ErrInProgress = errors.New("payments: оплата уже создаётся")
 )
+
+// payInProgressWindow — если попытка в created моложе этого срока, считаем, что оплата уже
+// создаётся (другой запрос ещё регистрирует её в Сбере), и не плодим новую.
+const payInProgressWindow = 30 * time.Second
 
 // SberClient — то, что нужно платежам от клиента Сбера. В тестах подменяется заглушкой.
 type SberClient interface {

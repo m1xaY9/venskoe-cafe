@@ -380,6 +380,23 @@ func TestPayReusesLivePayment(t *testing.T) {
 	}
 }
 
+func TestPayInProgress(t *testing.T) {
+	pool := setup(t)
+	orderID, number, token := createOrder(t, pool, orders.StatusCreated, 0)
+
+	// Свежая попытка в created — значит оплата уже создаётся.
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO payments (order_id, attempt, sber_order_number, amount_kop, status)
+		VALUES ($1, 1, $2, 39000, 'created')`, orderID, fmt.Sprintf("%d-1", number)); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := newSvc(pool, &fakeSber{registerResp: sber.RegisterResponse{ErrorCode: "0", OrderID: "s", FormURL: "u"}})
+	if _, err := svc.Pay(context.Background(), token); err != ErrInProgress {
+		t.Fatalf("ждали ErrInProgress, получили %v", err)
+	}
+}
+
 func TestPayDisabled(t *testing.T) {
 	pool := setup(t)
 	_, _, token := createOrder(t, pool, orders.StatusCreated, 0)

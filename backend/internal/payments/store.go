@@ -60,6 +60,23 @@ func (s *Service) preparePayment(ctx context.Context, token string) (prep, error
 		return prep{}, ErrNotPayable
 	}
 
+	// Свежая попытка в created (<30 c) — другой запрос ещё регистрирует оплату в Сбере.
+	var pendingSince time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT created_at FROM payments
+		WHERE order_id = $1 AND status = $2
+		ORDER BY attempt DESC LIMIT 1`, p.orderID, StatusCreated).Scan(&pendingSince)
+	switch {
+	case err == nil:
+		if s.now().Before(pendingSince.Add(payInProgressWindow)) {
+			return prep{}, ErrInProgress
+		}
+	case errors.Is(err, pgx.ErrNoRows):
+		// нет незавершённых попыток — продолжаем
+	default:
+		return prep{}, err
+	}
+
 	// Живая попытка в registered, время не вышло — переиспользуем её форму.
 	var (
 		formURL   string
