@@ -90,7 +90,3 @@ curl -X POST http://localhost:8080/api/orders \
 # Открыть заказ по токену из ответа:
 curl http://localhost:8080/api/orders/<token>
 ```
-
-Подсказки адреса работают только если в `.env` задан `DADATA_API_KEY`; без него `GET /api/address/suggest` отвечает `503`, остальной сайт работает.
-
-Если приложение стоит за обратным прокси (Caddy), укажите его адреса в `TRUSTED_PROXIES` (CIDR через запятую) — тогда IP гостя для ограничения частоты берётся из `X-Forwarded-For`.
