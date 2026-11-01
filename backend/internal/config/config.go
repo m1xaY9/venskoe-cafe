@@ -50,7 +50,7 @@ type SberConfig struct {
 	FFDVersion string `env:"SBER_FFD_VERSION"`
 	TaxSystem  string `env:"SBER_TAX_SYSTEM"`
 	// VAT — тип НДС (taxType, тег ФФД 1199). Указатель, чтобы отличить «не задано» (nil)
-	// от валидного 0 («без НДС»). Допустимы значения 0..13 (см. docs/sber-ecom-api.yaml).
+	// от валидного 0 («без НДС»). Допустимы значения 0..13.
 	VAT *int   `env:"SBER_VAT"`
 	INN string `env:"SBER_INN"`
 }
