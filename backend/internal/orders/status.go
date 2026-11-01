@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Статусы заказа. Жизнь заказа описана в docs/architecture.md.
+// Статусы заказа и его жизненный цикл.
 const (
 	StatusCreated         = "created"          // создан; онлайн-оплата ещё не начата
 	StatusAwaitingPayment = "awaiting_payment" // ждём оплату в Сбере
